@@ -20,28 +20,28 @@ Built with Rust to practice async programming, web frameworks, and modern Rust p
 
 ### Public
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check |
-| `POST` | `/api/auth/register` | Register a new user |
-| `POST` | `/api/auth/login` | Login and get JWT token |
+| Method | Path                 | Description             |
+| ------ | -------------------- | ----------------------- |
+| `GET`  | `/health`            | Health check            |
+| `POST` | `/api/auth/register` | Register a new user     |
+| `POST` | `/api/auth/login`    | Login and get JWT token |
 
 ### Protected (require `Authorization: Bearer <token>`)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/expenses/upload` | Upload a Monefy CSV file |
-| `GET` | `/api/expenses` | List expenses with filters and pagination |
-| `DELETE` | `/api/expenses/{id}` | Delete an expense |
+| Method   | Path                   | Description                               |
+| -------- | ---------------------- | ----------------------------------------- |
+| `POST`   | `/api/expenses/upload` | Upload a Monefy CSV file                  |
+| `GET`    | `/api/expenses`        | List expenses with filters and pagination |
+| `DELETE` | `/api/expenses/{id}`   | Delete an expense                         |
 
 ### Analytics (require `Authorization: Bearer <token>`)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/analytics/summary` | Total income, expenses, and net |
-| `GET` | `/api/analytics/by-category` | Breakdown by expense category |
-| `GET` | `/api/analytics/by-account` | Breakdown by account (Cash / Payment card) |
-| `GET` | `/api/analytics/timeline` | Daily or weekly timeline |
+| Method | Path                         | Description                                |
+| ------ | ---------------------------- | ------------------------------------------ |
+| `GET`  | `/api/analytics/summary`     | Total income, expenses, and net            |
+| `GET`  | `/api/analytics/by-category` | Breakdown by expense category              |
+| `GET`  | `/api/analytics/by-account`  | Breakdown by account (Cash / Payment card) |
+| `GET`  | `/api/analytics/timeline`    | Daily or weekly timeline                   |
 
 Query parameters for analytics: `from`, `to` (dates in `YYYY-MM-DD` format), `group_by` (`day` or `week` for timeline).
 
@@ -50,9 +50,6 @@ Query parameters for expenses list: `from`, `to`, `category`, `account`, `page`,
 ## Quick Start
 
 ```sh
-# Set up environment
-cp .env.example .env  # or create .env with JWT_SECRET and PORT
-
 # Build and run
 cargo run
 

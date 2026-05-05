@@ -50,6 +50,7 @@ pub async fn register_and_login(app: &Router) -> (String, uuid::Uuid) {
     (token, user_id)
 }
 
+#[allow(dead_code)]
 pub fn auth_header(token: &str) -> String {
     format!("Bearer {}", token)
 }
