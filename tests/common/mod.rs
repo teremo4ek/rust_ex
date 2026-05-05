@@ -1,6 +1,6 @@
-use axum::body::Body;
 use axum::Router;
-use serde_json::{json, Value};
+use axum::body::Body;
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use expense_tracker::config::Config;
