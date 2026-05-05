@@ -34,6 +34,14 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 - Real CSV fixture: `tests/fixtures/monefy.csv` — use it for upload and analytics tests
 - Each test file creates its own app instance (fresh state, no test pollution)
 
+# Debug Mode
+
+- Only compiled in debug builds (`cargo run`), absent in release (`cargo build --release`)
+- `src/debug_setup.rs` auto-creates a user on startup with a fixed JWT token
+- Credentials: `debug@example.com` / `debug123`
+- Token is printed to console on startup and is deterministic (same token every restart)
+- Debug JWT secret overrides `.env` `JWT_SECRET` in debug builds
+
 # Gotchas
 
 - Monefy CSV has two columns named "currency" — serde deserialize fails on this, always use `StringRecord` index-based parsing
