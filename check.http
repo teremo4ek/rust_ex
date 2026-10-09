@@ -1,0 +1,31 @@
+
+###  Register
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "password123"}'
+
+### Login
+POST http://localhost:3000/api/auth/login HTTP/1.1
+content-type: application/json
+
+{
+    "email": "debug@example.com",
+    "password": "debug123"
+}
+
+### Upload CSV
+curl -X POST http://localhost:3000/api/expenses/upload \
+  -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4" \
+  -F "file=@tests/fixtures/monefy.csv"
+
+### Get summary
+curl http://localhost:3000/api/analytics/summary \
+  -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4"
+
+### Get breakdown by category
+curl http://localhost:3000/api/analytics/by-category?from=2026-04-01&to=2026-04-30 \
+  -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4"
+
+### Get daily timeline
+curl http://localhost:3000/api/analytics/timeline?group_by=day \
+  -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4"
