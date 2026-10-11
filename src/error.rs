@@ -21,6 +21,9 @@ pub enum AppError {
 
     #[error("conflict: {0}")]
     Conflict(String),
+
+    #[error("external api error: {0}")]
+    ExternalApi(String),
 }
 
 impl IntoResponse for AppError {
@@ -35,6 +38,7 @@ impl IntoResponse for AppError {
             }
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            AppError::ExternalApi(msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
         };
 
         let body = json!({ "error": message });
@@ -46,8 +50,8 @@ impl From<validator::ValidationErrors> for AppError {
     fn from(err: validator::ValidationErrors) -> Self {
         let msg = err
             .field_errors()
-            .iter()
-            .flat_map(|(_, errors)| errors.iter())
+            .values()
+            .flat_map(|errors| errors.iter())
             .map(|e| e.message.clone().unwrap_or_default().to_string())
             .collect::<Vec<_>>()
             .join(", ");
