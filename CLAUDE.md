@@ -39,15 +39,16 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 # Debug Mode
 
 - Only compiled in debug builds (`cargo run`), absent in release (`cargo build --release`)
-- `src/debug_setup.rs` auto-creates a user on startup with a fixed JWT token
+- `src/common/debug_setup.rs` (library module under `#[cfg(debug_assertions)]`, used by both server startup and the CLI) auto-creates a user with a fixed JWT token
 - Credentials: `debug@example.com` / `debug123`
 - Token is printed to console on startup and is deterministic (same token every restart)
 - Debug JWT secret overrides `.env` `JWT_SECRET` in debug builds
+- In debug builds the CLI also seeds this user: auth menu has `3) Continue as debug user (debug@example.com)`, and `1) Login` works with the debug credentials; release builds show only Login/Register
 
 # CLI Mode
 
 - `cargo run -- cli` — interactive session: no HTTP listener, no env vars, no dotenvy/tracing
-- Every run starts with empty in-memory state: register or log in inside the session (token is discarded; random JWT secret per run)
+- Every run starts with empty in-memory state: register or log in inside the session (token is discarded; random JWT secret per run); debug builds additionally seed the debug user (see Debug Mode)
 - Commands: `upload <path>`, `stats [summary|category|account|timeline [day|week]] [from <date>] [to <date>]`, `help`, `exit`/`quit`; EOF (Ctrl-D) exits cleanly
 - `src/cli/session.rs` `run()` takes `&mut dyn BufRead` + `&mut dyn Write` so unit tests drive sessions from byte scripts
 - `tests/cli_tests.rs` spawns the real binary via `CARGO_BIN_EXE_expense_tracker` with piped stdin

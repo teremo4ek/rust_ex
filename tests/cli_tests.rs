@@ -68,3 +68,12 @@ fn cli_unknown_argument_exits_nonzero() {
     assert_eq!(code, Some(2));
     assert!(stderr.contains("Unknown argument"));
 }
+
+#[cfg(debug_assertions)]
+#[test]
+fn cli_debug_user_option() {
+    let (stdout, _stderr, code) = run_cli(&["cli"], "3\nstats\nexit\n");
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Logged in as debug@example.com"));
+    assert!(stdout.contains("No expenses found for the selected period."));
+}

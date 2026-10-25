@@ -2,6 +2,8 @@ use std::io::{BufRead, Write};
 
 use validator::Validate;
 
+#[cfg(debug_assertions)]
+use crate::common::debug_setup;
 use crate::common::error::{AppError, AppResult};
 use crate::common::models::{LoginRequest, RegisterRequest, User};
 use crate::common::services::auth_service;
@@ -57,6 +59,11 @@ async fn authenticate(
     loop {
         write_line(output, "1) Login")?;
         write_line(output, "2) Register")?;
+        #[cfg(debug_assertions)]
+        write_line(
+            output,
+            &format!("3) Continue as debug user ({})", debug_setup::DEBUG_EMAIL),
+        )?;
         let Some(choice) = read_line(input, output, "Choose: ")? else {
             return Ok(None);
         };
@@ -71,10 +78,31 @@ async fn authenticate(
                     return Ok(Some(user));
                 }
             }
+            #[cfg(debug_assertions)]
+            "3" => {
+                debug_setup::seed_debug_user(state).await;
+                let Some(user) = state
+                    .users
+                    .read()
+                    .await
+                    .get(&debug_setup::DEBUG_USER_ID)
+                    .cloned()
+                else {
+                    return Err(AppError::Internal(
+                        "debug user missing after seeding".into(),
+                    ));
+                };
+                write_line(output, &format!("Logged in as {}", user.email))?;
+                return Ok(Some(user));
+            }
             other => {
+                #[cfg(debug_assertions)]
+                let options = "1, 2 or 3";
+                #[cfg(not(debug_assertions))]
+                let options = "1 or 2";
                 write_line(
                     output,
-                    &format!("Error: unknown option '{other}', enter 1 or 2"),
+                    &format!("Error: unknown option '{other}', enter {options}"),
                 )?;
             }
         }
@@ -237,6 +265,16 @@ mod tests {
     async fn test_eof_exits_cleanly() {
         let out = run_script("2\nnew@example.com\npassword123\n").await;
         assert!(out.contains("Registered and logged in as new@example.com"));
+        assert!(out.contains("Bye!"));
+    }
+
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn test_debug_user_option() {
+        let out = run_script("3\nstats\nexit\n").await;
+        assert!(out.contains("3) Continue as debug user (debug@example.com)"));
+        assert!(out.contains("Logged in as debug@example.com"));
+        assert!(out.contains("No expenses found for the selected period."));
         assert!(out.contains("Bye!"));
     }
 }
