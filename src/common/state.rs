@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::config::Config;
-use crate::models::{Expense, User};
+use crate::common::config::Config;
+use crate::common::models::{Expense, User};
 
 #[derive(Debug, Clone)]
 pub struct AppState {

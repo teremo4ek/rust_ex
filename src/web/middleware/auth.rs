@@ -2,9 +2,9 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use uuid::Uuid;
 
-use crate::error::AppError;
-use crate::services::auth_service;
-use crate::state::AppState;
+use crate::common::error::AppError;
+use crate::common::services::auth_service;
+use crate::common::state::AppState;
 
 #[derive(Debug, Clone)]
 pub struct AuthUser {

@@ -2,13 +2,25 @@
 mod debug_setup;
 
 use axum::routing::get;
-use expense_tracker::config::Config;
-use expense_tracker::routes;
-use expense_tracker::state::AppState;
+use expense_tracker::cli;
+use expense_tracker::common::config::Config;
+use expense_tracker::common::state::AppState;
+use expense_tracker::web::routes;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
+    match std::env::args().nth(1).as_deref() {
+        None => run_server().await,
+        Some("cli") => cli::run().await,
+        Some(_) => {
+            eprintln!("Unknown argument. Usage: expense_tracker [cli]");
+            std::process::exit(2);
+        }
+    }
+}
+
+async fn run_server() {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())

@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use serde::Deserialize;
 
-use crate::error::{AppError, AppResult};
+use crate::common::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Currency {

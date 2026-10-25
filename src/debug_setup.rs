@@ -1,8 +1,8 @@
 use uuid::Uuid;
 
-use expense_tracker::models::User;
-use expense_tracker::services::auth_service;
-use expense_tracker::state::AppState;
+use expense_tracker::common::models::User;
+use expense_tracker::common::services::auth_service;
+use expense_tracker::common::state::AppState;
 
 pub const DEBUG_USER_ID: Uuid = Uuid::from_u128(1);
 pub const DEBUG_EMAIL: &str = "debug@example.com";

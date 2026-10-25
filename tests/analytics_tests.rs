@@ -92,7 +92,7 @@ async fn test_by_category() {
     )
     .unwrap();
     assert!(body.is_array());
-    assert!(body.as_array().unwrap().len() > 0);
+    assert!(!body.as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

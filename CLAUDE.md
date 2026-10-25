@@ -6,6 +6,7 @@
 - Integration tests only: `cargo test --tests`
 - Lint: `cargo clippy`
 - Run server: `cargo run`
+- Run CLI: `cargo run -- cli`
 
 Always run `cargo clippy` and `cargo test` before reporting work as done.
 
@@ -21,10 +22,11 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 # Architecture
 
 - In-memory state only (`Arc<tokio::sync::RwLock<...>>`). Do not add a database.
-- Auth: custom `AuthUser` extractor in `src/middleware/auth.rs` validates JWT from `Authorization` header
+- Layout: `src/common` (shared: models, services, state, config, error), `src/web` (HTTP: routes, handlers, middleware), `src/cli` (console session). `src/main.rs` dispatches: no args → server, `cli` → console mode, anything else → usage + exit 2
+- Auth: custom `AuthUser` extractor in `src/web/middleware/auth.rs` validates JWT from `Authorization` header
 - CSV parsing: Monefy format, 8 columns with duplicate "currency" header — use `csv::StringRecord` manually, not serde deserialization (serde can't handle duplicate column names)
-- Error handling: all errors go through `AppError` in `src/error.rs` — add new variants there, never return raw library errors from handlers
-- Lib+bin layout: `src/lib.rs` exposes modules for integration tests, `src/main.rs` is server startup only
+- Error handling: all errors go through `AppError` in `src/common/error.rs` — add new variants there, never return raw library errors from handlers
+- Lib+bin layout: `src/lib.rs` exposes modules for integration tests, `src/main.rs` is dispatch + server startup
 
 # Testing
 
@@ -41,6 +43,14 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 - Credentials: `debug@example.com` / `debug123`
 - Token is printed to console on startup and is deterministic (same token every restart)
 - Debug JWT secret overrides `.env` `JWT_SECRET` in debug builds
+
+# CLI Mode
+
+- `cargo run -- cli` — interactive session: no HTTP listener, no env vars, no dotenvy/tracing
+- Every run starts with empty in-memory state: register or log in inside the session (token is discarded; random JWT secret per run)
+- Commands: `upload <path>`, `stats [summary|category|account|timeline [day|week]] [from <date>] [to <date>]`, `help`, `exit`/`quit`; EOF (Ctrl-D) exits cleanly
+- `src/cli/session.rs` `run()` takes `&mut dyn BufRead` + `&mut dyn Write` so unit tests drive sessions from byte scripts
+- `tests/cli_tests.rs` spawns the real binary via `CARGO_BIN_EXE_expense_tracker` with piped stdin
 
 # Gotchas
 

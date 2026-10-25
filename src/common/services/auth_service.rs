@@ -4,9 +4,9 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, AppResult};
-use crate::models::User;
-use crate::state::AppState;
+use crate::common::error::{AppError, AppResult};
+use crate::common::models::User;
+use crate::common::state::AppState;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {

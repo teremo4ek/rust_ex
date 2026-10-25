@@ -50,8 +50,11 @@ Query parameters for expenses list: `from`, `to`, `category`, `account`, `page`,
 ## Quick Start
 
 ```sh
-# Build and run
+# Build and run the web server
 cargo run
+
+# Run the interactive CLI (no server required)
+cargo run -- cli
 
 # Run tests
 cargo test
@@ -106,44 +109,84 @@ curl http://localhost:3000/api/analytics/timeline?group_by=day \
   -H "Authorization: Bearer <token>"
 ```
 
+## CLI Mode
+
+An interactive console session with the same data pipeline, no web server required:
+
+```sh
+cargo run -- cli
+```
+
+```text
+Expense Tracker CLI (in-memory session)
+1) Login
+2) Register
+Choose: 2
+Email: user@example.com
+Password: password123
+Registered and logged in as user@example.com
+Type 'help' for available commands.
+expense> upload tests/fixtures/monefy.csv
+Imported 41 expenses from tests/fixtures/monefy.csv
+expense> stats
+Total income        797.00
+Total expense       540.13
+Net                 256.87
+
+Category              Amount    Share
+Food                  346.12   64.08%
+Gifts                  77.80   14.40%
+House                  34.76    6.44%
+expense> exit
+Bye!
+```
+
+| Command | Description |
+| ------- | ----------- |
+| `upload <path>` | Import a Monefy CSV file |
+| `stats` | Overview: summary + category breakdown |
+| `stats summary / category / account` | Single view |
+| `stats timeline [day\|week]` | Spending over time |
+| `from <date>` / `to <date>` | Optional date filters (YYYY-MM-DD) |
+| `help` / `exit` | Usage / quit |
+
+State is in-memory and per-run: every session starts empty, no environment variables are required, no HTTP listener is started.
+
 ## Project Structure
 
 ```
 src/
 ├── lib.rs                  # library root (used by integration tests)
-├── main.rs                 # server startup
-├── config.rs               # environment configuration
-├── error.rs                # unified error type
-├── state.rs                # shared application state
-├── middleware/
-│   └── auth.rs             # JWT extractor
-├── routes/
-│   └── mod.rs              # route definitions
-├── handlers/
-│   ├── auth.rs             # register, login
-│   ├── expenses.rs         # upload, list, delete
-│   └── analytics.rs        # summary, by-category, by-account, timeline
-├── services/
-│   ├── auth_service.rs     # auth logic
-│   ├── expense_service.rs  # CSV parsing, CRUD
-│   └── analytics_service.rs # aggregation logic
-└── models/
-    ├── user.rs             # User struct
-    ├── expense.rs          # Expense, Account, Category
-    └── dto.rs              # request/response types with validation
+├── main.rs                 # dispatch: no args → server, "cli" → console mode
+├── common/                 # shared between web and CLI
+│   ├── config.rs           # environment configuration
+│   ├── error.rs            # unified error type
+│   ├── state.rs            # shared application state
+│   ├── models/             # User, Expense, DTOs
+│   ├── services/           # auth, CSV parsing, analytics (HTTP-free)
+│   └── helpers/            # NBRB exchange rate helper
+├── web/
+│   ├── routes.rs           # route definitions
+│   ├── handlers/           # register, login, upload, list, delete, analytics
+│   └── middleware/auth.rs  # JWT extractor
+└── cli/
+    ├── session.rs          # interactive loop (login/register menu, commands)
+    ├── commands.rs         # command parsing and execution
+    └── views.rs            # text table rendering
 
 tests/
 ├── common/mod.rs           # test helpers
 ├── auth_tests.rs           # authentication tests
 ├── expenses_tests.rs       # expenses tests
 ├── analytics_tests.rs      # analytics tests
+├── cli_tests.rs            # CLI integration tests (spawn the binary)
 └── fixtures/monefy.csv     # sample CSV for tests
 ```
 
 ## Testing
 
-- **11 unit tests** — CSV parsing, analytics calculations, JWT generation/validation, password hashing
-- **18 integration tests** — full request/response flows via `tower::ServiceExt::oneshot`
+- **42 unit tests** — CSV parsing, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
+- **22 integration tests** — 18 web flows via `tower::ServiceExt::oneshot`, 4 CLI flows by spawning the real binary
 
 ```sh
 cargo test              # run all tests

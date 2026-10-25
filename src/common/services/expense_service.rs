@@ -3,10 +3,10 @@ use chrono::NaiveDate;
 use csv::{ReaderBuilder, StringRecord};
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult};
-use crate::models::dto::ExpensesQuery;
-use crate::models::{Account, Category, Expense};
-use crate::state::AppState;
+use crate::common::error::{AppError, AppResult};
+use crate::common::models::dto::ExpensesQuery;
+use crate::common::models::{Account, Category, Expense};
+use crate::common::state::AppState;
 
 pub async fn upload_csv(
     state: &AppState,
@@ -23,13 +23,17 @@ pub async fn upload_csv(
         let content = String::from_utf8(data.to_vec())
             .map_err(|_| AppError::BadRequest("CSV file must be UTF-8".into()))?;
 
-        let expenses = parse_csv(&content, user_id)?;
-        let count = expenses.len();
-        state.expenses.write().await.extend(expenses);
-        return Ok(count);
+        return import_csv(state, user_id, &content).await;
     }
 
     Err(AppError::BadRequest("no 'file' field in upload".into()))
+}
+
+pub async fn import_csv(state: &AppState, user_id: Uuid, content: &str) -> AppResult<usize> {
+    let expenses = parse_csv(content, user_id)?;
+    let count = expenses.len();
+    state.expenses.write().await.extend(expenses);
+    Ok(count)
 }
 
 pub fn parse_csv(content: &str, user_id: Uuid) -> AppResult<Vec<Expense>> {
@@ -210,6 +214,7 @@ pub async fn get_user_expenses(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::config::Config;
 
     const VALID_CSV: &str = "\
 date,account,category,amount,currency,converted amount,currency,description
@@ -257,5 +262,34 @@ date,account,category,amount,currency,converted amount,currency,description
 ";
         let result = parse_csv(csv, Uuid::new_v4());
         assert!(result.is_err());
+    }
+
+    fn test_state() -> AppState {
+        let config = Config {
+            jwt_secret: "test_secret".into(),
+            jwt_expires_in: 3600,
+            port: 0,
+        };
+        AppState::from_config(&config)
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_inserts_rows() {
+        let state = test_state();
+        let count = import_csv(&state, Uuid::new_v4(), VALID_CSV).await.unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(state.expenses.read().await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_propagates_parse_error() {
+        let state = test_state();
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+not-a-date,Cash,Food,-10,BYN,-10,BYN,Test
+";
+        let result = import_csv(&state, Uuid::new_v4(), csv).await;
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+        assert!(state.expenses.read().await.is_empty());
     }
 }

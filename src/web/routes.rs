@@ -3,8 +3,8 @@ use axum::Router;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-use crate::handlers;
-use crate::state::AppState;
+use crate::common::state::AppState;
+use crate::web::handlers;
 
 pub fn create_router(state: AppState) -> Router {
     let protected_routes = Router::new()

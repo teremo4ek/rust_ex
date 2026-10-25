@@ -1,11 +1,11 @@
 use axum::extract::{Query, State};
 use axum::Json;
 
-use crate::error::AppResult;
-use crate::middleware::auth::AuthUser;
-use crate::models::dto::AnalyticsQuery;
-use crate::services::{analytics_service, expense_service};
-use crate::state::AppState;
+use crate::common::error::AppResult;
+use crate::common::models::dto::AnalyticsQuery;
+use crate::common::services::{analytics_service, expense_service};
+use crate::common::state::AppState;
+use crate::web::middleware::auth::AuthUser;
 
 pub async fn summary(
     State(state): State<AppState>,

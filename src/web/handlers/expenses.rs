@@ -3,11 +3,11 @@ use axum::http::StatusCode;
 use axum::Json;
 use uuid::Uuid;
 
-use crate::error::AppResult;
-use crate::middleware::auth::AuthUser;
-use crate::models::dto::{ExpensesQuery, ExpensesResponse, UploadResponse};
-use crate::services::expense_service;
-use crate::state::AppState;
+use crate::common::error::AppResult;
+use crate::common::models::dto::{ExpensesQuery, ExpensesResponse, UploadResponse};
+use crate::common::services::expense_service;
+use crate::common::state::AppState;
+use crate::web::middleware::auth::AuthUser;
 
 pub async fn upload(
     State(state): State<AppState>,

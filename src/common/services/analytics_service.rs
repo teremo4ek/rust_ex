@@ -1,10 +1,10 @@
 use chrono::{Datelike, Duration, NaiveDate};
 use std::collections::HashMap;
 
-use crate::models::dto::{
+use crate::common::models::dto::{
     AccountBreakdown, CategoryBreakdown, SummaryResponse, TimelinePoint,
 };
-use crate::models::Expense;
+use crate::common::models::Expense;
 
 pub fn summary(expenses: &[Expense]) -> SummaryResponse {
     let total_income: f64 = expenses.iter().filter(|e| e.is_income()).map(|e| e.amount).sum();
@@ -113,7 +113,7 @@ fn week_key(date: NaiveDate) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Account, Category};
+    use crate::common::models::{Account, Category};
 
     fn make_expense(date: &str, category: Category, account: Account, amount: f64) -> Expense {
         Expense {

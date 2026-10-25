@@ -3,10 +3,10 @@ use axum::http::StatusCode;
 use axum::Json;
 use validator::Validate;
 
-use crate::error::AppResult;
-use crate::models::{LoginRequest, LoginResponse, RegisterRequest};
-use crate::services::auth_service;
-use crate::state::AppState;
+use crate::common::error::AppResult;
+use crate::common::models::{LoginRequest, LoginResponse, RegisterRequest};
+use crate::common::services::auth_service;
+use crate::common::state::AppState;
 
 pub async fn register(
     State(state): State<AppState>,

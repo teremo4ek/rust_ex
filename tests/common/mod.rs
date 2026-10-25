@@ -3,9 +3,9 @@ use axum::body::Body;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use expense_tracker::config::Config;
-use expense_tracker::routes;
-use expense_tracker::state::AppState;
+use expense_tracker::common::config::Config;
+use expense_tracker::common::state::AppState;
+use expense_tracker::web::routes;
 
 pub fn create_test_app() -> Router {
     let config = Config {
