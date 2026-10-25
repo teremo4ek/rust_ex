@@ -1,8 +1,8 @@
 use uuid::Uuid;
 
-use expense_tracker::common::models::User;
-use expense_tracker::common::services::auth_service;
-use expense_tracker::common::state::AppState;
+use crate::common::models::User;
+use crate::common::services::auth_service;
+use crate::common::state::AppState;
 
 pub const DEBUG_USER_ID: Uuid = Uuid::from_u128(1);
 pub const DEBUG_EMAIL: &str = "debug@example.com";
@@ -22,8 +22,9 @@ pub async fn seed_debug_user(state: &AppState) {
         };
         users.insert(user.id, user);
     }
-    drop(users);
+}
 
+pub fn print_debug_banner() {
     let token = auth_service::generate_token(
         &DEBUG_USER_ID.to_string(),
         DEBUG_JWT_SECRET,

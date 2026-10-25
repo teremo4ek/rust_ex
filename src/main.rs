@@ -1,9 +1,8 @@
-#[cfg(debug_assertions)]
-mod debug_setup;
-
 use axum::routing::get;
 use expense_tracker::cli;
 use expense_tracker::common::config::Config;
+#[cfg(debug_assertions)]
+use expense_tracker::common::debug_setup;
 use expense_tracker::common::state::AppState;
 use expense_tracker::web::routes;
 use tracing_subscriber::EnvFilter;
@@ -26,15 +25,20 @@ async fn run_server() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let mut config = Config::from_env();
+    let config = Config::from_env();
     #[cfg(debug_assertions)]
-    {
+    let config = {
+        let mut config = config;
         config.jwt_secret = debug_setup::DEBUG_JWT_SECRET.into();
-    }
+        config
+    };
     let state = AppState::from_config(&config);
 
     #[cfg(debug_assertions)]
-    debug_setup::seed_debug_user(&state).await;
+    {
+        debug_setup::seed_debug_user(&state).await;
+        debug_setup::print_debug_banner();
+    }
 
     let app = routes::create_router(state)
         .route("/health", get(|| async { "ok" }));
