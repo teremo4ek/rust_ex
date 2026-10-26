@@ -117,38 +117,14 @@ An interactive console session with the same data pipeline, no web server requir
 cargo run -- cli
 ```
 
-```text
-Expense Tracker CLI (in-memory session)
-1) Login
-2) Register
-Choose: 2
-Email: user@example.com
-Password: password123
-Registered and logged in as user@example.com
-Type 'help' for available commands.
-expense> upload tests/fixtures/monefy.csv
-Imported 41 expenses from tests/fixtures/monefy.csv
-expense> stats
-Total income        797.00
-Total expense       540.13
-Net                 256.87
-
-Category              Amount    Share
-Food                  346.12   64.08%
-Gifts                  77.80   14.40%
-House                  34.76    6.44%
-expense> exit
-Bye!
-```
-
-| Command | Description |
-| ------- | ----------- |
-| `upload <path>` | Import a Monefy CSV file |
-| `stats` | Overview: summary + category breakdown |
-| `stats summary / category / account` | Single view |
-| `stats timeline [day\|week]` | Spending over time |
-| `from <date>` / `to <date>` | Optional date filters (YYYY-MM-DD) |
-| `help` / `exit` | Usage / quit |
+| Command                              | Description                            |
+| ------------------------------------ | -------------------------------------- |
+| `upload <path>`                      | Import a Monefy CSV file               |
+| `stats`                              | Overview: summary + category breakdown |
+| `stats summary / category / account` | Single view                            |
+| `stats timeline [day\|week]`         | Spending over time                     |
+| `from <date>` / `to <date>`          | Optional date filters (YYYY-MM-DD)     |
+| `help` / `exit`                      | Usage / quit                           |
 
 State is in-memory and per-run: every session starts empty, no environment variables are required, no HTTP listener is started.
 

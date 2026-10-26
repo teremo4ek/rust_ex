@@ -33,7 +33,7 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 - Unit tests: `#[cfg(test)] mod tests` inside the same file
 - Integration tests: `tests/` directory, use `tower::ServiceExt::oneshot` with `axum::body::Body`
 - Test helper: `tests/common/mod.rs` — use `create_test_app()` and `register_and_login()` for setup
-- Real CSV fixture: `tests/fixtures/monefy.csv` — use it for upload and analytics tests
+- Synthetic CSV fixture: `tests/fixtures/monefy.csv` — use it for upload and analytics tests
 - Each test file creates its own app instance (fresh state, no test pollution)
 
 # Debug Mode
