@@ -62,9 +62,9 @@ async fn test_summary() {
             .unwrap(),
     )
     .unwrap();
-    assert!(body["total_income"].is_number());
-    assert!(body["total_expense"].is_number());
-    assert!(body["net"].is_number());
+    assert_eq!(body["total_income"].as_str().unwrap(), "793");
+    assert_eq!(body["total_expense"].as_str().unwrap(), "-559.17");
+    assert_eq!(body["net"].as_str().unwrap(), "233.83");
 }
 
 #[tokio::test]
@@ -93,6 +93,8 @@ async fn test_by_category() {
     .unwrap();
     assert!(body.is_array());
     assert!(!body.as_array().unwrap().is_empty());
+    assert!(body[0]["amount"].is_string());
+    assert!(body[0]["percentage"].is_string());
 }
 
 #[tokio::test]

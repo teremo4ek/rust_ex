@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
@@ -57,28 +58,28 @@ pub struct AnalyticsQuery {
 
 #[derive(Debug, Serialize)]
 pub struct SummaryResponse {
-    pub total_income: f64,
-    pub total_expense: f64,
-    pub net: f64,
+    pub total_income: Decimal,
+    pub total_expense: Decimal,
+    pub net: Decimal,
 }
 
 #[derive(Debug, Serialize)]
 pub struct CategoryBreakdown {
     pub category: String,
-    pub amount: f64,
-    pub percentage: f64,
+    pub amount: Decimal,
+    pub percentage: Decimal,
 }
 
 #[derive(Debug, Serialize)]
 pub struct AccountBreakdown {
     pub account: String,
-    pub income: f64,
-    pub expense: f64,
+    pub income: Decimal,
+    pub expense: Decimal,
 }
 
 #[derive(Debug, Serialize)]
 pub struct TimelinePoint {
     pub period: String,
-    pub income: f64,
-    pub expense: f64,
+    pub income: Decimal,
+    pub expense: Decimal,
 }

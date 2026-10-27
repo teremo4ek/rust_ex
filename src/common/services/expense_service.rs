@@ -1,6 +1,7 @@
 use axum::extract::Multipart;
 use chrono::NaiveDate;
 use csv::{ReaderBuilder, StringRecord};
+use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
@@ -87,7 +88,7 @@ fn parse_record(record: &StringRecord, user_id: Uuid) -> AppResult<Expense> {
         .parse()
         .map_err(|e: String| AppError::BadRequest(e))?;
 
-    let amount: f64 = record
+    let amount: Decimal = record
         .get(3)
         .unwrap_or_default()
         .parse()
@@ -215,6 +216,7 @@ pub async fn get_user_expenses(
 mod tests {
     use super::*;
     use crate::common::config::Config;
+    use rust_decimal::dec;
 
     const VALID_CSV: &str = "\
 date,account,category,amount,currency,converted amount,currency,description
@@ -228,7 +230,7 @@ date,account,category,amount,currency,converted amount,currency,description
         let expenses = parse_csv(VALID_CSV, user_id).unwrap();
         assert_eq!(expenses.len(), 3);
         assert_eq!(expenses[0].category.to_string(), "Food");
-        assert!((expenses[0].amount - -17.26).abs() < f64::EPSILON);
+        assert_eq!(expenses[0].amount, dec!(-17.26));
         assert_eq!(expenses[2].category.to_string(), "Deposits");
         assert!(expenses[2].is_income());
     }

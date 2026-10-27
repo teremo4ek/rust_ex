@@ -10,6 +10,7 @@ Built with Rust to practice async programming, web frameworks, and modern Rust p
 - **Async runtime:** tokio
 - **Authentication:** JWT (jsonwebtoken) + Argon2 password hashing
 - **CSV parsing:** csv + chrono
+- **Money:** rust_decimal — exact decimal amounts, no floating-point drift
 - **Validation:** validator
 - **Error handling:** thiserror + unified `AppError` with `IntoResponse`
 - **Logging:** tracing + tracing-subscriber
@@ -46,6 +47,18 @@ Built with Rust to practice async programming, web frameworks, and modern Rust p
 Query parameters for analytics: `from`, `to` (dates in `YYYY-MM-DD` format), `group_by` (`day` or `week` for timeline).
 
 Query parameters for expenses list: `from`, `to`, `category`, `account`, `page`, `per_page`.
+
+## Money in JSON
+
+Amounts are stored and aggregated with `rust_decimal` (exact decimal arithmetic). Money fields in JSON responses are strings, preserving exactness:
+
+```json
+{
+  "total_income": "793",
+  "total_expense": "-559.17",
+  "net": "233.83"
+}
+```
 
 ## Quick Start
 
@@ -161,8 +174,8 @@ tests/
 
 ## Testing
 
-- **42 unit tests** — CSV parsing, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
-- **22 integration tests** — 18 web flows via `tower::ServiceExt::oneshot`, 4 CLI flows by spawning the real binary
+- **43 unit tests** — CSV parsing, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
+- **24 integration tests** — 19 web flows via `tower::ServiceExt::oneshot`, 5 CLI flows by spawning the real binary
 
 ```sh
 cargo test              # run all tests
@@ -175,3 +188,4 @@ cargo test -- --test-threads=1  # sequential (useful for shared state)
 - **Unified error handling** — `AppError` enum with `impl IntoResponse` for consistent JSON error responses
 - **Concurrency** — `Arc<RwLock<HashMap<Uuid, User>>>` and `Arc<RwLock<Vec<Expense>>>` for safe async state access
 - **Separation of concerns** — handlers (HTTP layer), services (business logic), models (data types)
+- **Exact money** — `rust_decimal::Decimal` end-to-end, serialized as JSON strings

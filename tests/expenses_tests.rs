@@ -123,3 +123,38 @@ async fn test_list_expenses_with_category_filter() {
 
     assert_eq!(res.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn test_upload_rejects_non_finite_amount() {
+    let app = common::create_test_app();
+    let (token, _user_id) = common::register_and_login(&app).await;
+
+    let boundary = "test-boundary-nan";
+    let body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"nan.csv\"\r\n\
+         Content-Type: text/csv\r\n\
+         \r\n\
+         date,account,category,amount,currency,converted amount,currency,description\r\n\
+         4/22/2026,Cash,Food,NaN,BYN,NaN,BYN,Test\r\n\
+         --{boundary}--\r\n"
+    );
+
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/expenses/upload")
+                .header("authorization", common::auth_header(&token))
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}

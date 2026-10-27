@@ -193,6 +193,7 @@ mod tests {
     use crate::common::config::Config;
     use crate::common::models::{Account, Category, Expense};
     use crate::common::services::auth_service;
+    use rust_decimal::{dec, Decimal};
 
     fn test_state() -> AppState {
         AppState::from_config(&Config {
@@ -216,7 +217,7 @@ mod tests {
         (state, user.id)
     }
 
-    fn make_expense(user_id: Uuid, date: NaiveDate, account: Account, category: Category, amount: f64) -> Expense {
+    fn make_expense(user_id: Uuid, date: NaiveDate, account: Account, category: Category, amount: Decimal) -> Expense {
         Expense {
             id: Uuid::new_v4(),
             user_id,
@@ -362,21 +363,21 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
             Account::Cash,
             Category::Food,
-            -50.0,
+            dec!(-50.0),
         ));
         expenses.push(make_expense(
             user_id,
             NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
             Account::Cash,
             Category::Deposits,
-            100.0,
+            dec!(100.0),
         ));
         expenses.push(make_expense(
             user_id,
             NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
             Account::Cash,
             Category::Food,
-            -30.0,
+            dec!(-30.0),
         ));
         drop(expenses);
 
@@ -401,14 +402,14 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
             Account::Cash,
             Category::Food,
-            -50.0,
+            dec!(-50.0),
         ));
         expenses.push(make_expense(
             user_id,
             NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
             Account::Cash,
             Category::Food,
-            -30.0,
+            dec!(-30.0),
         ));
         drop(expenses);
 
