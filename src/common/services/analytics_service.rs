@@ -28,7 +28,7 @@ pub fn by_category(expenses: &[Expense]) -> Vec<CategoryBreakdown> {
     let mut by_cat: HashMap<String, Decimal> = HashMap::new();
     for e in expenses.iter().filter(|e| e.is_expense()) {
         *by_cat
-            .entry(e.category.to_string())
+            .entry(e.category.clone())
             .or_default() += e.amount.abs();
     }
 
@@ -114,15 +114,15 @@ fn week_key(date: NaiveDate) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::models::{Account, Category};
+    use crate::common::models::Account;
 
-    fn make_expense(date: &str, category: Category, account: Account, amount: Decimal) -> Expense {
+    fn make_expense(date: &str, category: &str, account: Account, amount: Decimal) -> Expense {
         Expense {
             id: uuid::Uuid::new_v4(),
             user_id: uuid::Uuid::new_v4(),
             date: NaiveDate::parse_from_str(date, "%m/%d/%Y").unwrap(),
             account,
-            category,
+            category: category.into(),
             amount,
             currency: "BYN".into(),
             description: String::new(),
@@ -132,9 +132,9 @@ mod tests {
     #[test]
     fn test_summary() {
         let expenses = vec![
-            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-50.0)),
-            make_expense("4/22/2026", Category::Deposits, Account::Cash, dec!(100.0)),
-            make_expense("4/23/2026", Category::Food, Account::PaymentCard, dec!(-30.0)),
+            make_expense("4/22/2026", "Food",Account::Cash, dec!(-50.0)),
+            make_expense("4/22/2026", "Deposits",Account::Cash, dec!(100.0)),
+            make_expense("4/23/2026", "Food",Account::PaymentCard, dec!(-30.0)),
         ];
         let result = summary(&expenses);
         assert_eq!(result.total_income, dec!(100));
@@ -145,9 +145,9 @@ mod tests {
     #[test]
     fn test_by_category() {
         let expenses = vec![
-            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-60.0)),
-            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-40.0)),
-            make_expense("4/22/2026", Category::Transport, Account::Cash, dec!(-50.0)),
+            make_expense("4/22/2026", "Food",Account::Cash, dec!(-60.0)),
+            make_expense("4/22/2026", "Food",Account::Cash, dec!(-40.0)),
+            make_expense("4/22/2026", "Transport",Account::Cash, dec!(-50.0)),
         ];
         let result = by_category(&expenses);
         assert_eq!(result.len(), 2);
@@ -161,9 +161,9 @@ mod tests {
     #[test]
     fn test_by_account() {
         let expenses = vec![
-            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-30.0)),
-            make_expense("4/22/2026", Category::Deposits, Account::Cash, dec!(50.0)),
-            make_expense("4/22/2026", Category::Food, Account::PaymentCard, dec!(-20.0)),
+            make_expense("4/22/2026", "Food",Account::Cash, dec!(-30.0)),
+            make_expense("4/22/2026", "Deposits",Account::Cash, dec!(50.0)),
+            make_expense("4/22/2026", "Food",Account::PaymentCard, dec!(-20.0)),
         ];
         let result = by_account(&expenses);
         assert_eq!(result.len(), 2);
@@ -172,9 +172,9 @@ mod tests {
     #[test]
     fn test_timeline_day() {
         let expenses = vec![
-            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-30.0)),
-            make_expense("4/22/2026", Category::Deposits, Account::Cash, dec!(50.0)),
-            make_expense("4/23/2026", Category::Food, Account::Cash, dec!(-20.0)),
+            make_expense("4/22/2026", "Food",Account::Cash, dec!(-30.0)),
+            make_expense("4/22/2026", "Deposits",Account::Cash, dec!(50.0)),
+            make_expense("4/23/2026", "Food",Account::Cash, dec!(-20.0)),
         ];
         let result = timeline(&expenses, "day");
         assert_eq!(result.len(), 2);

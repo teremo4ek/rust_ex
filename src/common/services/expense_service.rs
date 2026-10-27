@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
 use crate::common::models::dto::ExpensesQuery;
-use crate::common::models::{Account, Category, Expense};
+use crate::common::models::{Account, Expense};
 use crate::common::state::AppState;
 
 pub async fn upload_csv(
@@ -82,11 +82,10 @@ fn parse_record(record: &StringRecord, user_id: Uuid) -> AppResult<Expense> {
         .parse()
         .map_err(|e: String| AppError::BadRequest(e))?;
 
-    let category: Category = record
-        .get(2)
-        .unwrap_or_default()
-        .parse()
-        .map_err(|e: String| AppError::BadRequest(e))?;
+    let category = record.get(2).unwrap_or_default().trim().to_string();
+    if category.is_empty() {
+        return Err(AppError::BadRequest("empty category field".into()));
+    }
 
     let amount: Decimal = record
         .get(3)
@@ -127,7 +126,7 @@ pub async fn list_expenses(
             None => true,
         })
         .filter(|e| match &query.category {
-            Some(cat) if !cat.is_empty() => e.category.to_string() == *cat,
+            Some(cat) if !cat.is_empty() => e.category == *cat,
             _ => true,
         })
         .filter(|e| match &query.account {
@@ -163,7 +162,7 @@ pub async fn count_expenses(
             None => true,
         })
         .filter(|e| match &query.category {
-            Some(cat) if !cat.is_empty() => e.category.to_string() == *cat,
+            Some(cat) if !cat.is_empty() => e.category == *cat,
             _ => true,
         })
         .filter(|e| match &query.account {
@@ -229,9 +228,9 @@ date,account,category,amount,currency,converted amount,currency,description
         let user_id = Uuid::new_v4();
         let expenses = parse_csv(VALID_CSV, user_id).unwrap();
         assert_eq!(expenses.len(), 3);
-        assert_eq!(expenses[0].category.to_string(), "Food");
+        assert_eq!(expenses[0].category, "Food");
         assert_eq!(expenses[0].amount, dec!(-17.26));
-        assert_eq!(expenses[2].category.to_string(), "Deposits");
+        assert_eq!(expenses[2].category, "Deposits");
         assert!(expenses[2].is_income());
     }
 
@@ -257,13 +256,24 @@ not-a-date,Cash,Food,-10,BYN,-10,BYN,Test
     }
 
     #[test]
-    fn test_parse_unknown_category() {
+    fn test_parse_accepts_custom_category() {
         let csv = "\
 date,account,category,amount,currency,converted amount,currency,description
-4/22/2026,Cash,UnknownCat,-10,BYN,-10,BYN,Test
+4/22/2026,Cash,Eating out,-10,BYN,-10,BYN,Test
+";
+        let expenses = parse_csv(csv, Uuid::new_v4()).unwrap();
+        assert_eq!(expenses.len(), 1);
+        assert_eq!(expenses[0].category, "Eating out");
+    }
+
+    #[test]
+    fn test_parse_rejects_empty_category() {
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,,-10,BYN,-10,BYN,Test
 ";
         let result = parse_csv(csv, Uuid::new_v4());
-        assert!(result.is_err());
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
     }
 
     fn test_state() -> AppState {

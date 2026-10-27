@@ -88,7 +88,7 @@ date,account,category,amount,currency,converted amount,currency,description
 
 - Date format: `M/D/YYYY`
 - Negative `amount` = expense, positive = income
-- Supported categories: Food, House, Transport, Deposits, Gifts, Entertainment, Toiletry, Communications, Bills, Salary
+- Categories: any non-empty category from the export is accepted (Monefy defaults and custom ones, e.g. "Eating out")
 - Supported accounts: Cash, Payment card
 
 ## Example Usage
@@ -174,7 +174,7 @@ tests/
 
 ## Testing
 
-- **43 unit tests** — CSV parsing, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
+- **44 unit tests** — CSV parsing, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
 - **24 integration tests** — 19 web flows via `tower::ServiceExt::oneshot`, 5 CLI flows by spawning the real binary
 
 ```sh

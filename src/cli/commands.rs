@@ -191,7 +191,7 @@ pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppR
 mod tests {
     use super::*;
     use crate::common::config::Config;
-    use crate::common::models::{Account, Category, Expense};
+    use crate::common::models::{Account, Expense};
     use crate::common::services::auth_service;
     use rust_decimal::{dec, Decimal};
 
@@ -217,13 +217,13 @@ mod tests {
         (state, user.id)
     }
 
-    fn make_expense(user_id: Uuid, date: NaiveDate, account: Account, category: Category, amount: Decimal) -> Expense {
+    fn make_expense(user_id: Uuid, date: NaiveDate, account: Account, category: &str, amount: Decimal) -> Expense {
         Expense {
             id: Uuid::new_v4(),
             user_id,
             date,
             account,
-            category,
+            category: category.into(),
             amount,
             currency: "BYN".into(),
             description: String::new(),
@@ -362,21 +362,21 @@ mod tests {
             user_id,
             NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
             Account::Cash,
-            Category::Food,
+            "Food",
             dec!(-50.0),
         ));
         expenses.push(make_expense(
             user_id,
             NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
             Account::Cash,
-            Category::Deposits,
+            "Deposits",
             dec!(100.0),
         ));
         expenses.push(make_expense(
             user_id,
             NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
             Account::Cash,
-            Category::Food,
+            "Food",
             dec!(-30.0),
         ));
         drop(expenses);
@@ -401,14 +401,14 @@ mod tests {
             user_id,
             NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
             Account::Cash,
-            Category::Food,
+            "Food",
             dec!(-50.0),
         ));
         expenses.push(make_expense(
             user_id,
             NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
             Account::Cash,
-            Category::Food,
+            "Food",
             dec!(-30.0),
         ));
         drop(expenses);
