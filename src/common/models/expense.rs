@@ -31,64 +31,13 @@ impl std::str::FromStr for Account {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Category {
-    Food,
-    House,
-    Transport,
-    Deposits,
-    Gifts,
-    Entertainment,
-    Toiletry,
-    Communications,
-    Bills,
-    Salary,
-}
-
-impl std::str::FromStr for Category {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Food" => Ok(Category::Food),
-            "House" => Ok(Category::House),
-            "Transport" => Ok(Category::Transport),
-            "Deposits" => Ok(Category::Deposits),
-            "Gifts" => Ok(Category::Gifts),
-            "Entertainment" => Ok(Category::Entertainment),
-            "Toiletry" => Ok(Category::Toiletry),
-            "Communications" => Ok(Category::Communications),
-            "Bills" => Ok(Category::Bills),
-            "Salary" => Ok(Category::Salary),
-            _ => Err(format!("unknown category: {}", s)),
-        }
-    }
-}
-
-impl std::fmt::Display for Category {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Category::Food => write!(f, "Food"),
-            Category::House => write!(f, "House"),
-            Category::Transport => write!(f, "Transport"),
-            Category::Deposits => write!(f, "Deposits"),
-            Category::Gifts => write!(f, "Gifts"),
-            Category::Entertainment => write!(f, "Entertainment"),
-            Category::Toiletry => write!(f, "Toiletry"),
-            Category::Communications => write!(f, "Communications"),
-            Category::Bills => write!(f, "Bills"),
-            Category::Salary => write!(f, "Salary"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Expense {
     pub id: Uuid,
     pub user_id: Uuid,
     pub date: NaiveDate,
     pub account: Account,
-    pub category: Category,
+    pub category: String,
     pub amount: Decimal,
     pub currency: String,
     pub description: String,

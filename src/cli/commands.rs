@@ -9,7 +9,9 @@ use super::views;
 
 #[derive(Debug)]
 pub enum Command {
-    Upload { path: String },
+    Upload {
+        path: String,
+    },
     Stats {
         view: Option<StatsView>,
         from: Option<NaiveDate>,
@@ -191,9 +193,9 @@ pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppR
 mod tests {
     use super::*;
     use crate::common::config::Config;
-    use crate::common::models::{Account, Category, Expense};
+    use crate::common::models::{Account, Expense};
     use crate::common::services::auth_service;
-    use rust_decimal::{dec, Decimal};
+    use rust_decimal::{Decimal, dec};
 
     fn test_state() -> AppState {
         AppState::from_config(&Config {
@@ -217,13 +219,19 @@ mod tests {
         (state, user.id)
     }
 
-    fn make_expense(user_id: Uuid, date: NaiveDate, account: Account, category: Category, amount: Decimal) -> Expense {
+    fn make_expense(
+        user_id: Uuid,
+        date: NaiveDate,
+        account: Account,
+        category: &str,
+        amount: Decimal,
+    ) -> Expense {
         Expense {
             id: Uuid::new_v4(),
             user_id,
             date,
             account,
-            category,
+            category: category.into(),
             amount,
             currency: "BYN".into(),
             description: String::new(),
@@ -245,22 +253,38 @@ mod tests {
     #[test]
     fn test_parse_stats_default() {
         let cmd = parse_command("stats").unwrap();
-        assert!(matches!(cmd, Command::Stats { view: None, from: None, to: None }));
+        assert!(matches!(
+            cmd,
+            Command::Stats {
+                view: None,
+                from: None,
+                to: None
+            }
+        ));
     }
 
     #[test]
     fn test_parse_stats_views() {
         assert!(matches!(
             parse_command("stats summary").unwrap(),
-            Command::Stats { view: Some(StatsView::Summary), .. }
+            Command::Stats {
+                view: Some(StatsView::Summary),
+                ..
+            }
         ));
         assert!(matches!(
             parse_command("stats category").unwrap(),
-            Command::Stats { view: Some(StatsView::Category), .. }
+            Command::Stats {
+                view: Some(StatsView::Category),
+                ..
+            }
         ));
         assert!(matches!(
             parse_command("stats account").unwrap(),
-            Command::Stats { view: Some(StatsView::Account), .. }
+            Command::Stats {
+                view: Some(StatsView::Account),
+                ..
+            }
         ));
     }
 
@@ -268,11 +292,21 @@ mod tests {
     fn test_parse_stats_timeline() {
         assert!(matches!(
             parse_command("stats timeline").unwrap(),
-            Command::Stats { view: Some(StatsView::Timeline { group_by: GroupBy::Day }), .. }
+            Command::Stats {
+                view: Some(StatsView::Timeline {
+                    group_by: GroupBy::Day
+                }),
+                ..
+            }
         ));
         assert!(matches!(
             parse_command("stats timeline week").unwrap(),
-            Command::Stats { view: Some(StatsView::Timeline { group_by: GroupBy::Week }), .. }
+            Command::Stats {
+                view: Some(StatsView::Timeline {
+                    group_by: GroupBy::Week
+                }),
+                ..
+            }
         ));
     }
 
@@ -287,7 +321,14 @@ mod tests {
         ));
 
         let cmd = parse_command("stats summary to 2026-04-30 from 2026-04-01").unwrap();
-        assert!(matches!(cmd, Command::Stats { from: Some(_), to: Some(_), .. }));
+        assert!(matches!(
+            cmd,
+            Command::Stats {
+                from: Some(_),
+                to: Some(_),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -362,21 +403,21 @@ mod tests {
             user_id,
             NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
             Account::Cash,
-            Category::Food,
+            "Food",
             dec!(-50.0),
         ));
         expenses.push(make_expense(
             user_id,
             NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
             Account::Cash,
-            Category::Deposits,
+            "Deposits",
             dec!(100.0),
         ));
         expenses.push(make_expense(
             user_id,
             NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
             Account::Cash,
-            Category::Food,
+            "Food",
             dec!(-30.0),
         ));
         drop(expenses);
@@ -401,14 +442,14 @@ mod tests {
             user_id,
             NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
             Account::Cash,
-            Category::Food,
+            "Food",
             dec!(-50.0),
         ));
         expenses.push(make_expense(
             user_id,
             NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
             Account::Cash,
-            Category::Food,
+            "Food",
             dec!(-30.0),
         ));
         drop(expenses);
