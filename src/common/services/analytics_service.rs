@@ -1,4 +1,5 @@
 use chrono::{Datelike, Duration, NaiveDate};
+use rust_decimal::{dec, Decimal};
 use std::collections::HashMap;
 
 use crate::common::models::dto::{
@@ -7,8 +8,8 @@ use crate::common::models::dto::{
 use crate::common::models::Expense;
 
 pub fn summary(expenses: &[Expense]) -> SummaryResponse {
-    let total_income: f64 = expenses.iter().filter(|e| e.is_income()).map(|e| e.amount).sum();
-    let total_expense: f64 = expenses.iter().filter(|e| e.is_expense()).map(|e| e.amount).sum();
+    let total_income: Decimal = expenses.iter().filter(|e| e.is_income()).map(|e| e.amount).sum();
+    let total_expense: Decimal = expenses.iter().filter(|e| e.is_expense()).map(|e| e.amount).sum();
 
     SummaryResponse {
         total_income,
@@ -18,13 +19,13 @@ pub fn summary(expenses: &[Expense]) -> SummaryResponse {
 }
 
 pub fn by_category(expenses: &[Expense]) -> Vec<CategoryBreakdown> {
-    let total: f64 = expenses
+    let total: Decimal = expenses
         .iter()
         .filter(|e| e.is_expense())
         .map(|e| e.amount.abs())
         .sum();
 
-    let mut by_cat: HashMap<String, f64> = HashMap::new();
+    let mut by_cat: HashMap<String, Decimal> = HashMap::new();
     for e in expenses.iter().filter(|e| e.is_expense()) {
         *by_cat
             .entry(e.category.to_string())
@@ -34,10 +35,10 @@ pub fn by_category(expenses: &[Expense]) -> Vec<CategoryBreakdown> {
     let mut result: Vec<CategoryBreakdown> = by_cat
         .into_iter()
         .map(|(category, amount)| {
-            let percentage = if total > 0.0 {
-                (amount / total) * 100.0
+            let percentage = if total > Decimal::ZERO {
+                (amount / total * dec!(100)).round_dp(2)
             } else {
-                0.0
+                Decimal::ZERO
             };
             CategoryBreakdown {
                 category,
@@ -47,7 +48,7 @@ pub fn by_category(expenses: &[Expense]) -> Vec<CategoryBreakdown> {
         })
         .collect();
 
-    result.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+    result.sort_by_key(|b| std::cmp::Reverse(b.amount));
     result
 }
 
@@ -59,8 +60,8 @@ pub fn by_account(expenses: &[Expense]) -> Vec<AccountBreakdown> {
             .entry(e.account.to_string())
             .or_insert(AccountBreakdown {
                 account: e.account.to_string(),
-                income: 0.0,
-                expense: 0.0,
+                income: Decimal::ZERO,
+                expense: Decimal::ZERO,
             });
 
         if e.is_income() {
@@ -71,12 +72,12 @@ pub fn by_account(expenses: &[Expense]) -> Vec<AccountBreakdown> {
     }
 
     let mut result: Vec<AccountBreakdown> = by_acc.into_values().collect();
-    result.sort_by(|a, b| b.income.partial_cmp(&a.income).unwrap_or(std::cmp::Ordering::Equal));
+    result.sort_by_key(|b| std::cmp::Reverse(b.income));
     result
 }
 
 pub fn timeline(expenses: &[Expense], group_by: &str) -> Vec<TimelinePoint> {
-    let mut points: HashMap<String, (f64, f64)> = HashMap::new();
+    let mut points: HashMap<String, (Decimal, Decimal)> = HashMap::new();
 
     for e in expenses {
         let period = match group_by {
@@ -115,7 +116,7 @@ mod tests {
     use super::*;
     use crate::common::models::{Account, Category};
 
-    fn make_expense(date: &str, category: Category, account: Account, amount: f64) -> Expense {
+    fn make_expense(date: &str, category: Category, account: Account, amount: Decimal) -> Expense {
         Expense {
             id: uuid::Uuid::new_v4(),
             user_id: uuid::Uuid::new_v4(),
@@ -131,36 +132,38 @@ mod tests {
     #[test]
     fn test_summary() {
         let expenses = vec![
-            make_expense("4/22/2026", Category::Food, Account::Cash, -50.0),
-            make_expense("4/22/2026", Category::Deposits, Account::Cash, 100.0),
-            make_expense("4/23/2026", Category::Food, Account::PaymentCard, -30.0),
+            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-50.0)),
+            make_expense("4/22/2026", Category::Deposits, Account::Cash, dec!(100.0)),
+            make_expense("4/23/2026", Category::Food, Account::PaymentCard, dec!(-30.0)),
         ];
         let result = summary(&expenses);
-        assert!((result.total_income - 100.0).abs() < f64::EPSILON);
-        assert!((result.total_expense - (-80.0)).abs() < f64::EPSILON);
-        assert!((result.net - 20.0).abs() < f64::EPSILON);
+        assert_eq!(result.total_income, dec!(100));
+        assert_eq!(result.total_expense, dec!(-80));
+        assert_eq!(result.net, dec!(20));
     }
 
     #[test]
     fn test_by_category() {
         let expenses = vec![
-            make_expense("4/22/2026", Category::Food, Account::Cash, -60.0),
-            make_expense("4/22/2026", Category::Food, Account::Cash, -40.0),
-            make_expense("4/22/2026", Category::Transport, Account::Cash, -50.0),
+            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-60.0)),
+            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-40.0)),
+            make_expense("4/22/2026", Category::Transport, Account::Cash, dec!(-50.0)),
         ];
         let result = by_category(&expenses);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].category, "Food");
-        assert!((result[0].percentage - 66.666_666_666_666_66).abs() < 0.01);
+        assert_eq!(result[0].amount, dec!(100));
+        assert_eq!(result[0].percentage, dec!(66.67));
         assert_eq!(result[1].category, "Transport");
+        assert_eq!(result[1].percentage, dec!(33.33));
     }
 
     #[test]
     fn test_by_account() {
         let expenses = vec![
-            make_expense("4/22/2026", Category::Food, Account::Cash, -30.0),
-            make_expense("4/22/2026", Category::Deposits, Account::Cash, 50.0),
-            make_expense("4/22/2026", Category::Food, Account::PaymentCard, -20.0),
+            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-30.0)),
+            make_expense("4/22/2026", Category::Deposits, Account::Cash, dec!(50.0)),
+            make_expense("4/22/2026", Category::Food, Account::PaymentCard, dec!(-20.0)),
         ];
         let result = by_account(&expenses);
         assert_eq!(result.len(), 2);
@@ -169,9 +172,9 @@ mod tests {
     #[test]
     fn test_timeline_day() {
         let expenses = vec![
-            make_expense("4/22/2026", Category::Food, Account::Cash, -30.0),
-            make_expense("4/22/2026", Category::Deposits, Account::Cash, 50.0),
-            make_expense("4/23/2026", Category::Food, Account::Cash, -20.0),
+            make_expense("4/22/2026", Category::Food, Account::Cash, dec!(-30.0)),
+            make_expense("4/22/2026", Category::Deposits, Account::Cash, dec!(50.0)),
+            make_expense("4/23/2026", Category::Food, Account::Cash, dec!(-20.0)),
         ];
         let result = timeline(&expenses, "day");
         assert_eq!(result.len(), 2);

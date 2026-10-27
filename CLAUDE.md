@@ -59,3 +59,5 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 - CSV reader must use `.flexible(true)` to handle empty trailing rows (Monefy exports these)
 - `csv` field indices: 0=date, 1=account, 2=category, 3=amount, 4=currency, 5=converted amount, 6=currency (dup), 7=description
 - Account enum serializes as "Cash" and "Payment_card" via `snake_case` — display is "Cash" / "Payment card" (space, not underscore)
+- Money is `rust_decimal::Decimal` end-to-end (never `f64`): `Expense.amount`, analytics DTOs, NBRB rate helper. JSON money fields serialize as strings ("793", "-559.17"); `dec!()` needs the `macros` feature
+- `Decimal` equality is value-based (`dec!(100) == dec!(100.0)`), scale only affects serialization; CLI renders 2 dp via `{:.2}` (Display supports precision)

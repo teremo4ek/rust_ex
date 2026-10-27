@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use crate::common::error::{AppError, AppResult};
@@ -21,11 +22,11 @@ impl Currency {
 #[derive(Deserialize)]
 struct RateResponse {
     #[serde(rename = "Cur_OfficialRate")]
-    rate: f64,
+    rate: Decimal,
 }
 
 // check api https://www.nbrb.by/apihelp/exrates
-pub async fn get_rate(currency: Currency, date: NaiveDate) -> AppResult<f64> {
+pub async fn get_rate(currency: Currency, date: NaiveDate) -> AppResult<Decimal> {
     let url = format!(
         "https://api.nbrb.by/exrates/rates/{}?parammode=2&ondate={}",
         currency.as_str(),
@@ -55,13 +56,14 @@ pub async fn get_rate(currency: Currency, date: NaiveDate) -> AppResult<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal::dec;
 
     #[tokio::test]
     async fn usd_rate_on_fixed_date() {
         let rate = get_rate(Currency::Usd, NaiveDate::from_ymd_opt(2023, 1, 10).unwrap())
             .await
             .unwrap();
-        assert!((rate - 2.7101).abs() < 1e-4);
+        assert_eq!(rate.round_dp(4), dec!(2.7101));
     }
 
     #[tokio::test]
@@ -69,7 +71,7 @@ mod tests {
         let rate = get_rate(Currency::Eur, NaiveDate::from_ymd_opt(2023, 8, 21).unwrap())
             .await
             .unwrap();
-        assert!((rate - 3.4009).abs() < 1e-4);
+        assert_eq!(rate.round_dp(4), dec!(3.4009));
     }
 
     #[tokio::test]

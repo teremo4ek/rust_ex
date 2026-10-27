@@ -60,13 +60,14 @@ pub fn render_timeline(rows: &[TimelinePoint]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal::dec;
 
     #[test]
     fn test_render_summary() {
         let s = SummaryResponse {
-            total_income: 1000.0,
-            total_expense: -400.0,
-            net: 600.0,
+            total_income: dec!(1000.0),
+            total_expense: dec!(-400.0),
+            net: dec!(600.0),
         };
         let out = render_summary(&s);
         assert!(out.contains("1000.00"));
@@ -79,8 +80,8 @@ mod tests {
     fn test_render_categories() {
         let rows = vec![CategoryBreakdown {
             category: "Food".into(),
-            amount: 17.26,
-            percentage: 45.5,
+            amount: dec!(17.26),
+            percentage: dec!(45.5),
         }];
         let out = render_categories(&rows);
         assert!(out.contains("Category"));
@@ -93,8 +94,8 @@ mod tests {
     fn test_render_accounts() {
         let rows = vec![AccountBreakdown {
             account: "Payment card".into(),
-            income: 100.0,
-            expense: 50.5,
+            income: dec!(100.0),
+            expense: dec!(50.5),
         }];
         let out = render_accounts(&rows);
         assert!(out.contains("Account"));
@@ -107,8 +108,8 @@ mod tests {
     fn test_render_timeline() {
         let rows = vec![TimelinePoint {
             period: "2026-01-05 - 2026-01-11".into(),
-            income: 100.0,
-            expense: 50.0,
+            income: dec!(100.0),
+            expense: dec!(50.0),
         }];
         let out = render_timeline(&rows);
         assert!(out.contains("Period"));

@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -88,17 +89,17 @@ pub struct Expense {
     pub date: NaiveDate,
     pub account: Account,
     pub category: Category,
-    pub amount: f64,
+    pub amount: Decimal,
     pub currency: String,
     pub description: String,
 }
 
 impl Expense {
     pub fn is_income(&self) -> bool {
-        self.amount > 0.0
+        self.amount > Decimal::ZERO
     }
 
     pub fn is_expense(&self) -> bool {
-        self.amount < 0.0
+        self.amount < Decimal::ZERO
     }
 }
