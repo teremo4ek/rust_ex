@@ -25,7 +25,7 @@ pub async fn list(
 ) -> AppResult<Json<ExpensesResponse>> {
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(50).min(100);
-    let total = expense_service::count_expenses(&state, auth.id, &query).await;
+    let total = expense_service::count_expenses(&state, auth.id, &query).await?;
     let expenses = expense_service::list_expenses(&state, auth.id, &query).await?;
 
     Ok(Json(ExpensesResponse {

@@ -32,9 +32,27 @@ pub async fn upload_csv(
 
 pub async fn import_csv(state: &AppState, user_id: Uuid, content: &str) -> AppResult<usize> {
     let expenses = parse_csv(content, user_id)?;
-    let count = expenses.len();
-    state.expenses.write().await.extend(expenses);
-    Ok(count)
+
+    let mut tx = state.pool.begin().await?;
+    for expense in &expenses {
+        sqlx::query(
+            "INSERT INTO expenses (id, user_id, date, account, category, amount, currency, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(expense.id.to_string())
+        .bind(expense.user_id.to_string())
+        .bind(expense.date)
+        .bind(expense.account.to_string())
+        .bind(expense.category.clone())
+        .bind(expense.amount.to_string())
+        .bind(expense.currency.clone())
+        .bind(expense.description.clone())
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+
+    Ok(expenses.len())
 }
 
 pub fn parse_csv(content: &str, user_id: Uuid) -> AppResult<Vec<Expense>> {
@@ -109,74 +127,127 @@ fn parse_record(record: &StringRecord, user_id: Uuid) -> AppResult<Expense> {
     })
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct ExpenseRow {
+    id: String,
+    user_id: String,
+    date: NaiveDate,
+    account: String,
+    category: String,
+    amount: String,
+    currency: String,
+    description: String,
+}
+
+impl ExpenseRow {
+    fn into_expense(self) -> AppResult<Expense> {
+        Ok(Expense {
+            id: self
+                .id
+                .parse()
+                .map_err(|_| AppError::Database("invalid expense id stored in expenses".into()))?,
+            user_id: self
+                .user_id
+                .parse()
+                .map_err(|_| AppError::Database("invalid user id stored in expenses".into()))?,
+            date: self.date,
+            account: self
+                .account
+                .parse()
+                .map_err(|_| AppError::Database("invalid account stored in expenses".into()))?,
+            category: self.category,
+            amount: self
+                .amount
+                .parse()
+                .map_err(|_| AppError::Database("invalid amount stored in expenses".into()))?,
+            currency: self.currency,
+            description: self.description,
+        })
+    }
+}
+
+const EXPENSE_COLUMNS: &str =
+    "id, user_id, date, account, category, amount, currency, description";
+
+fn push_filters<'a>(
+    qb: &mut sqlx::QueryBuilder<'a, sqlx::Sqlite>,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    category: Option<&'a str>,
+    account: Option<&'a str>,
+) {
+    if let Some(from) = from {
+        qb.push(" AND date >= ").push_bind(from);
+    }
+    if let Some(to) = to {
+        qb.push(" AND date <= ").push_bind(to);
+    }
+    if let Some(category) = category.filter(|c| !c.is_empty()) {
+        qb.push(" AND category = ").push_bind(category);
+    }
+    if let Some(account) = account.filter(|a| !a.is_empty()) {
+        qb.push(" AND account = ").push_bind(account);
+    }
+}
+
 pub async fn list_expenses(
     state: &AppState,
     user_id: Uuid,
     query: &ExpensesQuery,
 ) -> AppResult<Vec<Expense>> {
-    let expenses = state.expenses.read().await;
-    let filtered: Vec<Expense> = expenses
-        .iter()
-        .filter(|e| e.user_id == user_id)
-        .filter(|e| match query.from {
-            Some(from) => e.date >= from,
-            None => true,
-        })
-        .filter(|e| match query.to {
-            Some(to) => e.date <= to,
-            None => true,
-        })
-        .filter(|e| match &query.category {
-            Some(cat) if !cat.is_empty() => e.category == *cat,
-            _ => true,
-        })
-        .filter(|e| match &query.account {
-            Some(acc) if !acc.is_empty() => e.account.to_string() == *acc,
-            _ => true,
-        })
-        .cloned()
-        .collect();
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.unwrap_or(50).min(100);
+    let offset = (page - 1) as i64 * per_page as i64;
 
-    let page = query.page.unwrap_or(1).max(1) as usize;
-    let per_page = query.per_page.unwrap_or(50).min(100) as usize;
-    let start = (page - 1) * per_page;
-    let paginated: Vec<Expense> = filtered.into_iter().skip(start).take(per_page).collect();
+    let mut qb = sqlx::QueryBuilder::new(format!(
+        "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE user_id = "
+    ));
+    qb.push_bind(user_id.to_string());
+    push_filters(
+        &mut qb,
+        query.from,
+        query.to,
+        query.category.as_deref(),
+        query.account.as_deref(),
+    );
+    qb.push(" ORDER BY rowid LIMIT ")
+        .push_bind(per_page as i64)
+        .push(" OFFSET ")
+        .push_bind(offset);
 
-    Ok(paginated)
+    let rows: Vec<ExpenseRow> = qb.build_query_as().fetch_all(&state.pool).await?;
+    rows.into_iter().map(ExpenseRow::into_expense).collect()
 }
 
-pub async fn count_expenses(state: &AppState, user_id: Uuid, query: &ExpensesQuery) -> usize {
-    let expenses = state.expenses.read().await;
-    expenses
-        .iter()
-        .filter(|e| e.user_id == user_id)
-        .filter(|e| match query.from {
-            Some(from) => e.date >= from,
-            None => true,
-        })
-        .filter(|e| match query.to {
-            Some(to) => e.date <= to,
-            None => true,
-        })
-        .filter(|e| match &query.category {
-            Some(cat) if !cat.is_empty() => e.category == *cat,
-            _ => true,
-        })
-        .filter(|e| match &query.account {
-            Some(acc) if !acc.is_empty() => e.account.to_string() == *acc,
-            _ => true,
-        })
-        .count()
+pub async fn count_expenses(
+    state: &AppState,
+    user_id: Uuid,
+    query: &ExpensesQuery,
+) -> AppResult<usize> {
+    let mut qb = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM expenses WHERE user_id = ");
+    qb.push_bind(user_id.to_string());
+    push_filters(
+        &mut qb,
+        query.from,
+        query.to,
+        query.category.as_deref(),
+        query.account.as_deref(),
+    );
+
+    let count: i64 = qb.build_query_scalar().fetch_one(&state.pool).await?;
+    Ok(count as usize)
 }
 
 pub async fn delete_expense(state: &AppState, user_id: Uuid, expense_id: Uuid) -> AppResult<()> {
-    let mut expenses = state.expenses.write().await;
-    let idx = expenses
-        .iter()
-        .position(|e| e.id == expense_id && e.user_id == user_id)
-        .ok_or(AppError::NotFound("expense not found".into()))?;
+    let result = sqlx::query("DELETE FROM expenses WHERE id = ? AND user_id = ?")
+        .bind(expense_id.to_string())
+        .bind(user_id.to_string())
+        .execute(&state.pool)
+        .await?;
 
-    expenses.remove(idx);
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("expense not found".into()));
+    }
     Ok(())
 }
 
@@ -185,29 +256,23 @@ pub async fn get_user_expenses(
     user_id: Uuid,
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
-) -> Vec<Expense> {
-    state
-        .expenses
-        .read()
-        .await
-        .iter()
-        .filter(|e| e.user_id == user_id)
-        .filter(|e| match from {
-            Some(d) => e.date >= d,
-            None => true,
-        })
-        .filter(|e| match to {
-            Some(d) => e.date <= d,
-            None => true,
-        })
-        .cloned()
-        .collect()
+) -> AppResult<Vec<Expense>> {
+    let mut qb = sqlx::QueryBuilder::new(format!(
+        "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE user_id = "
+    ));
+    qb.push_bind(user_id.to_string());
+    push_filters(&mut qb, from, to, None, None);
+    qb.push(" ORDER BY rowid");
+
+    let rows: Vec<ExpenseRow> = qb.build_query_as().fetch_all(&state.pool).await?;
+    rows.into_iter().map(ExpenseRow::into_expense).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::common::config::Config;
+    use crate::common::services::auth_service;
     use rust_decimal::dec;
 
     const VALID_CSV: &str = "\
@@ -279,23 +344,54 @@ date,account,category,amount,currency,converted amount,currency,description
         AppState::from_config(&config).await.unwrap()
     }
 
+    async fn registered_state() -> (AppState, Uuid) {
+        let state = test_state().await;
+        let (_token, user) = auth_service::register(
+            &state,
+            "user@example.com".into(),
+            "password123".into(),
+            &state.jwt_secret,
+            state.jwt_expires_in,
+        )
+        .await
+        .unwrap();
+        (state, user.id)
+    }
+
+    fn empty_query() -> ExpensesQuery {
+        ExpensesQuery {
+            from: None,
+            to: None,
+            category: None,
+            account: None,
+            page: None,
+            per_page: None,
+        }
+    }
+
     #[tokio::test]
     async fn test_import_csv_inserts_rows() {
-        let state = test_state().await;
-        let count = import_csv(&state, Uuid::new_v4(), VALID_CSV).await.unwrap();
+        let (state, user_id) = registered_state().await;
+        let count = import_csv(&state, user_id, VALID_CSV).await.unwrap();
         assert_eq!(count, 3);
-        assert_eq!(state.expenses.read().await.len(), 3);
+        assert_eq!(
+            count_expenses(&state, user_id, &empty_query()).await.unwrap(),
+            3
+        );
     }
 
     #[tokio::test]
     async fn test_import_csv_propagates_parse_error() {
-        let state = test_state().await;
+        let (state, user_id) = registered_state().await;
         let csv = "\
 date,account,category,amount,currency,converted amount,currency,description
 not-a-date,Cash,Food,-10,BYN,-10,BYN,Test
 ";
-        let result = import_csv(&state, Uuid::new_v4(), csv).await;
+        let result = import_csv(&state, user_id, csv).await;
         assert!(matches!(result, Err(AppError::BadRequest(_))));
-        assert!(state.expenses.read().await.is_empty());
+        assert_eq!(
+            count_expenses(&state, user_id, &empty_query()).await.unwrap(),
+            0
+        );
     }
 }
