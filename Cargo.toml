@@ -22,6 +22,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 thiserror = "2"
 reqwest = { version = "0.12", features = ["json"] }
 rust_decimal = { version = "1", features = ["macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate", "chrono"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

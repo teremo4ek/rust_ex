@@ -1,4 +1,5 @@
 pub mod config;
+pub mod db;
 #[cfg(debug_assertions)]
 pub mod debug_setup;
 pub mod error;

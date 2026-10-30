@@ -24,6 +24,9 @@ pub enum AppError {
 
     #[error("external api error: {0}")]
     ExternalApi(String),
+
+    #[error("database error: {0}")]
+    Database(String),
 }
 
 impl IntoResponse for AppError {
@@ -39,6 +42,10 @@ impl IntoResponse for AppError {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
             AppError::ExternalApi(msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
+            AppError::Database(msg) => {
+                tracing::error!("database error: {}", msg);
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".into())
+            }
         };
 
         let body = json!({ "error": message });
@@ -86,6 +93,18 @@ impl From<String> for AppError {
 impl From<axum::extract::multipart::MultipartError> for AppError {
     fn from(err: axum::extract::multipart::MultipartError) -> Self {
         AppError::BadRequest(format!("multipart error: {}", err))
+    }
+}
+
+impl From<sqlx::Error> for AppError {
+    fn from(err: sqlx::Error) -> Self {
+        AppError::Database(err.to_string())
+    }
+}
+
+impl From<sqlx::migrate::MigrateError> for AppError {
+    fn from(err: sqlx::migrate::MigrateError) -> Self {
+        AppError::Database(err.to_string())
     }
 }
 
