@@ -100,3 +100,28 @@ fn cli_debug_user_option() {
     assert!(stdout.contains("Logged in as debug@example.com"));
     assert!(stdout.contains("No expenses found for the selected period."));
 }
+
+#[test]
+fn cli_data_persists_across_runs() {
+    let (db_url, db_path) = temp_db_url();
+
+    let script = format!(
+        "2\nuser@example.com\npassword123\nupload {}\nexit\n",
+        fixture_path()
+    );
+    let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Imported 41 expenses"));
+
+    let (stdout, _stderr, code) = run_cli_with_db(
+        &["cli"],
+        "1\nuser@example.com\npassword123\nstats\nexit\n",
+        &db_url,
+    );
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Logged in as user@example.com"));
+    assert!(stdout.contains("Total income"));
+    assert!(!stdout.contains("No expenses found"));
+
+    cleanup_db(&db_path);
+}
