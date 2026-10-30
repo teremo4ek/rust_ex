@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use tower::ServiceExt;
 
 async fn setup_with_expenses() -> (axum::Router, String, uuid::Uuid) {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let (token, user_id) = common::register_and_login(&app).await;
 
     let csv_content = include_str!("fixtures/monefy.csv");
@@ -153,7 +153,7 @@ async fn test_timeline() {
 
 #[tokio::test]
 async fn test_analytics_without_auth() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
 
     let res = app
         .clone()

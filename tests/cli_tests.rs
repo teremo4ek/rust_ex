@@ -1,10 +1,26 @@
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-fn run_cli(args: &[&str], script: &str) -> (String, String, Option<i32>) {
+fn temp_db_url() -> (String, PathBuf) {
+    let path = std::env::temp_dir().join(format!(
+        "expense_tracker_test_{}.db",
+        uuid::Uuid::new_v4()
+    ));
+    (format!("sqlite:{}", path.display()), path)
+}
+
+fn cleanup_db(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+fn run_cli_with_db(args: &[&str], script: &str, db_url: &str) -> (String, String, Option<i32>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_expense_tracker"))
         .args(args)
+        .env("DATABASE_URL", db_url)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -21,6 +37,13 @@ fn run_cli(args: &[&str], script: &str) -> (String, String, Option<i32>) {
         String::from_utf8_lossy(&output.stderr).into_owned(),
         output.status.code(),
     )
+}
+
+fn run_cli(args: &[&str], script: &str) -> (String, String, Option<i32>) {
+    let (db_url, db_path) = temp_db_url();
+    let result = run_cli_with_db(args, script, &db_url);
+    cleanup_db(&db_path);
+    result
 }
 
 fn fixture_path() -> String {

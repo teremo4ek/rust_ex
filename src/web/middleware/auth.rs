@@ -36,12 +36,13 @@ impl FromRequestParts<AppState> for AuthUser {
             .parse()
             .map_err(|_| AppError::Unauthorized)?;
 
-        let users = state.users.read().await;
-        let user = users.get(&user_id).ok_or(AppError::Unauthorized)?;
+        let user = auth_service::find_by_id(state, user_id)
+            .await?
+            .ok_or(AppError::Unauthorized)?;
 
         Ok(AuthUser {
             id: user.id,
-            email: user.email.clone(),
+            email: user.email,
         })
     }
 }

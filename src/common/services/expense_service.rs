@@ -269,18 +269,19 @@ date,account,category,amount,currency,converted amount,currency,description
         assert!(matches!(result, Err(AppError::BadRequest(_))));
     }
 
-    fn test_state() -> AppState {
+    async fn test_state() -> AppState {
         let config = Config {
             jwt_secret: "test_secret".into(),
             jwt_expires_in: 3600,
             port: 0,
+            database_url: "sqlite::memory:".into(),
         };
-        AppState::from_config(&config)
+        AppState::from_config(&config).await.unwrap()
     }
 
     #[tokio::test]
     async fn test_import_csv_inserts_rows() {
-        let state = test_state();
+        let state = test_state().await;
         let count = import_csv(&state, Uuid::new_v4(), VALID_CSV).await.unwrap();
         assert_eq!(count, 3);
         assert_eq!(state.expenses.read().await.len(), 3);
@@ -288,7 +289,7 @@ date,account,category,amount,currency,converted amount,currency,description
 
     #[tokio::test]
     async fn test_import_csv_propagates_parse_error() {
-        let state = test_state();
+        let state = test_state().await;
         let csv = "\
 date,account,category,amount,currency,converted amount,currency,description
 not-a-date,Cash,Food,-10,BYN,-10,BYN,Test

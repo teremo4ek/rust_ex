@@ -16,7 +16,7 @@ pub(crate) async fn run(
     output: &mut dyn Write,
     state: AppState,
 ) -> AppResult<()> {
-    write_line(output, "Expense Tracker CLI (in-memory session)")?;
+    write_line(output, "Expense Tracker CLI")?;
 
     let user = match authenticate(input, output, &state).await? {
         Some(user) => user,
@@ -81,12 +81,7 @@ async fn authenticate(
             #[cfg(debug_assertions)]
             "3" => {
                 debug_setup::seed_debug_user(state).await;
-                let Some(user) = state
-                    .users
-                    .read()
-                    .await
-                    .get(&debug_setup::DEBUG_USER_ID)
-                    .cloned()
+                let Some(user) = auth_service::find_by_id(state, debug_setup::DEBUG_USER_ID).await?
                 else {
                     return Err(AppError::Internal(
                         "debug user missing after seeding".into(),
@@ -216,7 +211,10 @@ mod tests {
             jwt_secret: "test_secret".into(),
             jwt_expires_in: 3600,
             port: 0,
-        });
+            database_url: "sqlite::memory:".into(),
+        })
+        .await
+        .unwrap();
         let mut input = script.as_bytes();
         let mut output = Vec::new();
         run(&mut input, &mut output, state).await.unwrap();

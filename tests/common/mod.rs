@@ -7,13 +7,14 @@ use expense_tracker::common::config::Config;
 use expense_tracker::common::state::AppState;
 use expense_tracker::web::routes;
 
-pub fn create_test_app() -> Router {
+pub async fn create_test_app() -> Router {
     let config = Config {
         jwt_secret: "test_secret".into(),
         jwt_expires_in: 3600,
         port: 0,
+        database_url: "sqlite::memory:".into(),
     };
-    let state = AppState::from_config(&config);
+    let state = AppState::from_config(&config).await.unwrap();
     routes::create_router(state).route("/health", axum::routing::get(|| async { "ok" }))
 }
 

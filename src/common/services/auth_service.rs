@@ -3,6 +3,7 @@ use argon2::Argon2;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
 use crate::common::models::User;
@@ -61,18 +62,22 @@ pub async fn register(
     jwt_secret: &str,
     jwt_expires_in: i64,
 ) -> AppResult<(String, User)> {
-    {
-        let users = state.users.read().await;
-        if users.values().any(|u| u.email == email) {
-            return Err(AppError::Conflict("email already registered".into()));
-        }
-    }
-
     let password_hash = hash_password(&password)?;
     let user = User::new(email, password_hash);
     let token = generate_token(&user.id.to_string(), jwt_secret, jwt_expires_in)?;
 
-    state.users.write().await.insert(user.id, user.clone());
+    let result = sqlx::query(
+        "INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?) ON CONFLICT (email) DO NOTHING",
+    )
+    .bind(user.id.to_string())
+    .bind(user.email.clone())
+    .bind(user.password_hash.clone())
+    .execute(&state.pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::Conflict("email already registered".into()));
+    }
 
     Ok((token, user))
 }
@@ -84,24 +89,52 @@ pub async fn login(
     jwt_secret: &str,
     jwt_expires_in: i64,
 ) -> AppResult<(String, User)> {
-    let (user_id, _password_hash) = {
-        let users = state.users.read().await;
-        let user = users
-            .values()
-            .find(|u| u.email == email)
-            .ok_or(AppError::Unauthorized)?;
+    let row = sqlx::query_as::<_, UserRow>(
+        "SELECT id, email, password_hash FROM users WHERE email = ?",
+    )
+    .bind(email)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::Unauthorized)?;
 
-        if !verify_password(password, &user.password_hash)? {
-            return Err(AppError::Unauthorized);
-        }
-        (user.id, user.password_hash.clone())
-    };
+    if !verify_password(password, &row.password_hash)? {
+        return Err(AppError::Unauthorized);
+    }
 
-    let token = generate_token(&user_id.to_string(), jwt_secret, jwt_expires_in)?;
-
-    let users = state.users.read().await;
-    let user = users.get(&user_id).cloned().ok_or(AppError::Unauthorized)?;
+    let user = row.into_user()?;
+    let token = generate_token(&user.id.to_string(), jwt_secret, jwt_expires_in)?;
     Ok((token, user))
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct UserRow {
+    id: String,
+    email: String,
+    password_hash: String,
+}
+
+impl UserRow {
+    fn into_user(self) -> AppResult<User> {
+        Ok(User {
+            id: self
+                .id
+                .parse()
+                .map_err(|_| AppError::Database("invalid user id stored in users".into()))?,
+            email: self.email,
+            password_hash: self.password_hash,
+        })
+    }
+}
+
+pub async fn find_by_id(state: &AppState, id: Uuid) -> AppResult<Option<User>> {
+    let row = sqlx::query_as::<_, UserRow>(
+        "SELECT id, email, password_hash FROM users WHERE id = ?",
+    )
+    .bind(id.to_string())
+    .fetch_optional(&state.pool)
+    .await?;
+
+    row.map(UserRow::into_user).transpose()
 }
 
 #[cfg(test)]

@@ -197,16 +197,19 @@ mod tests {
     use crate::common::services::auth_service;
     use rust_decimal::{Decimal, dec};
 
-    fn test_state() -> AppState {
+    async fn test_state() -> AppState {
         AppState::from_config(&Config {
             jwt_secret: "test_secret".into(),
             jwt_expires_in: 3600,
             port: 0,
+            database_url: "sqlite::memory:".into(),
         })
+        .await
+        .unwrap()
     }
 
     async fn registered_state() -> (AppState, Uuid) {
-        let state = test_state();
+        let state = test_state().await;
         let (_token, user) = auth_service::register(
             &state,
             "user@example.com".into(),

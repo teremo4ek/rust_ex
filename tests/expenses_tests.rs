@@ -6,7 +6,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_upload_csv() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let (token, _user_id) = common::register_and_login(&app).await;
 
     let csv_content = include_str!("fixtures/monefy.csv");
@@ -50,7 +50,7 @@ async fn test_upload_csv() {
 
 #[tokio::test]
 async fn test_upload_without_auth() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
 
     let boundary = "test-boundary";
     let body = format!(
@@ -84,7 +84,7 @@ async fn test_upload_without_auth() {
 
 #[tokio::test]
 async fn test_list_expenses() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let (token, _user_id) = common::register_and_login(&app).await;
 
     let res = app
@@ -105,7 +105,7 @@ async fn test_list_expenses() {
 
 #[tokio::test]
 async fn test_list_expenses_with_category_filter() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let (token, _user_id) = common::register_and_login(&app).await;
 
     let res = app
@@ -126,7 +126,7 @@ async fn test_list_expenses_with_category_filter() {
 
 #[tokio::test]
 async fn test_upload_rejects_non_finite_amount() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let (token, _user_id) = common::register_and_login(&app).await;
 
     let boundary = "test-boundary-nan";
