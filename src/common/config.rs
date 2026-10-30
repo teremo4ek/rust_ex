@@ -5,6 +5,7 @@ pub struct Config {
     pub jwt_secret: String,
     pub jwt_expires_in: i64,
     pub port: u16,
+    pub database_url: String,
 }
 
 impl Config {
@@ -20,6 +21,8 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(3000),
+            database_url: env::var("DATABASE_URL")
+                .expect("DATABASE_URL must be set"),
         }
     }
 }

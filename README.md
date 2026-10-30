@@ -15,7 +15,7 @@ Built with Rust to practice async programming, web frameworks, and modern Rust p
 - **Error handling:** thiserror + unified `AppError` with `IntoResponse`
 - **Logging:** tracing + tracing-subscriber
 - **Configuration:** dotenvy
-- **State:** in-memory via `Arc<tokio::sync::RwLock<...>>`
+- **Storage:** SQLite via sqlx 0.8 (runtime queries, embedded migrations)
 
 ## Endpoints
 
@@ -63,6 +63,9 @@ Amounts are stored and aggregated with `rust_decimal` (exact decimal arithmetic)
 ## Quick Start
 
 ```sh
+# Configure environment (set DATABASE_URL to a path outside the repo)
+cp .env.sample .env
+
 # Build and run the web server
 cargo run
 
@@ -139,7 +142,7 @@ cargo run -- cli
 | `from <date>` / `to <date>`          | Optional date filters (YYYY-MM-DD)     |
 | `help` / `exit`                      | Usage / quit                           |
 
-State is in-memory and per-run: every session starts empty, no environment variables are required, no HTTP listener is started.
+Data persists in the SQLite database across runs: the CLI loads `.env` and requires `DATABASE_URL` exactly like the server; no HTTP listener is started.
 
 ## Project Structure
 
@@ -149,6 +152,7 @@ src/
 ├── main.rs                 # dispatch: no args → server, "cli" → console mode
 ├── common/                 # shared between web and CLI
 │   ├── config.rs           # environment configuration
+│   ├── db.rs               # SQLite pool + migrations
 │   ├── error.rs            # unified error type
 │   ├── state.rs            # shared application state
 │   ├── models/             # User, Expense, DTOs
@@ -175,7 +179,7 @@ tests/
 ## Testing
 
 - **44 unit tests** — CSV parsing, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
-- **24 integration tests** — 19 web flows via `tower::ServiceExt::oneshot`, 5 CLI flows by spawning the real binary
+- **25 integration tests** — 19 web flows via `tower::ServiceExt::oneshot`, 6 CLI flows by spawning the real binary (including data persistence across runs)
 
 ```sh
 cargo test              # run all tests
@@ -186,6 +190,6 @@ cargo test -- --test-threads=1  # sequential (useful for shared state)
 
 - **Custom extractor** — `AuthUser` implements `FromRequestParts<AppState>` to extract user from JWT
 - **Unified error handling** — `AppError` enum with `impl IntoResponse` for consistent JSON error responses
-- **Concurrency** — `Arc<RwLock<HashMap<Uuid, User>>>` and `Arc<RwLock<Vec<Expense>>>` for safe async state access
+- **Connection pool** — `sqlx::SqlitePool` in `AppState`; concurrent SQLite writers serialized by the pool and busy timeout
 - **Separation of concerns** — handlers (HTTP layer), services (business logic), models (data types)
 - **Exact money** — `rust_decimal::Decimal` end-to-end, serialized as JSON strings

@@ -32,7 +32,9 @@ async fn run_server() {
         config.jwt_secret = debug_setup::DEBUG_JWT_SECRET.into();
         config
     };
-    let state = AppState::from_config(&config);
+    let state = AppState::from_config(&config)
+        .await
+        .expect("failed to initialize database");
 
     #[cfg(debug_assertions)]
     {

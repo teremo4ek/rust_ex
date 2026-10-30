@@ -13,7 +13,7 @@ pub async fn summary(
     Query(query): Query<AnalyticsQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
     let expenses =
-        expense_service::get_user_expenses(&state, auth.id, query.from, query.to).await;
+        expense_service::get_user_expenses(&state, auth.id, query.from, query.to).await?;
     Ok(Json(serde_json::to_value(analytics_service::summary(&expenses)).unwrap()))
 }
 
@@ -23,7 +23,7 @@ pub async fn by_category(
     Query(query): Query<AnalyticsQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
     let expenses =
-        expense_service::get_user_expenses(&state, auth.id, query.from, query.to).await;
+        expense_service::get_user_expenses(&state, auth.id, query.from, query.to).await?;
     Ok(Json(serde_json::to_value(analytics_service::by_category(&expenses)).unwrap()))
 }
 
@@ -33,7 +33,7 @@ pub async fn by_account(
     Query(query): Query<AnalyticsQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
     let expenses =
-        expense_service::get_user_expenses(&state, auth.id, query.from, query.to).await;
+        expense_service::get_user_expenses(&state, auth.id, query.from, query.to).await?;
     Ok(Json(serde_json::to_value(analytics_service::by_account(&expenses)).unwrap()))
 }
 
@@ -43,7 +43,7 @@ pub async fn timeline(
     Query(query): Query<AnalyticsQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
     let expenses =
-        expense_service::get_user_expenses(&state, auth.id, query.from, query.to).await;
+        expense_service::get_user_expenses(&state, auth.id, query.from, query.to).await?;
     let group_by = query.group_by.as_deref().unwrap_or("day");
     Ok(Json(serde_json::to_value(analytics_service::timeline(&expenses, group_by)).unwrap()))
 }

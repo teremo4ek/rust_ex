@@ -153,7 +153,7 @@ pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppR
             )))
         }
         Command::Stats { view, from, to } => {
-            let expenses = expense_service::get_user_expenses(state, user_id, *from, *to).await;
+            let expenses = expense_service::get_user_expenses(state, user_id, *from, *to).await?;
             if expenses.is_empty() {
                 return Ok(Outcome::Output(
                     "No expenses found for the selected period.".into(),
@@ -193,20 +193,21 @@ pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppR
 mod tests {
     use super::*;
     use crate::common::config::Config;
-    use crate::common::models::{Account, Expense};
     use crate::common::services::auth_service;
-    use rust_decimal::{Decimal, dec};
 
-    fn test_state() -> AppState {
+    async fn test_state() -> AppState {
         AppState::from_config(&Config {
             jwt_secret: "test_secret".into(),
             jwt_expires_in: 3600,
             port: 0,
+            database_url: "sqlite::memory:".into(),
         })
+        .await
+        .unwrap()
     }
 
     async fn registered_state() -> (AppState, Uuid) {
-        let state = test_state();
+        let state = test_state().await;
         let (_token, user) = auth_service::register(
             &state,
             "user@example.com".into(),
@@ -219,24 +220,12 @@ mod tests {
         (state, user.id)
     }
 
-    fn make_expense(
-        user_id: Uuid,
-        date: NaiveDate,
-        account: Account,
-        category: &str,
-        amount: Decimal,
-    ) -> Expense {
-        Expense {
-            id: Uuid::new_v4(),
-            user_id,
-            date,
-            account,
-            category: category.into(),
-            amount,
-            currency: "BYN".into(),
-            description: String::new(),
-        }
-    }
+    const OVERVIEW_CSV: &str = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,Food,-50,BYN,-50,BYN,
+4/22/2026,Cash,Deposits,100,BYN,100,BYN,
+5/1/2026,Cash,Food,-30,BYN,-30,BYN,
+";
 
     #[test]
     fn test_parse_upload() {
@@ -398,29 +387,9 @@ mod tests {
     #[tokio::test]
     async fn test_execute_stats_overview() {
         let (state, user_id) = registered_state().await;
-        let mut expenses = state.expenses.write().await;
-        expenses.push(make_expense(
-            user_id,
-            NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
-            Account::Cash,
-            "Food",
-            dec!(-50.0),
-        ));
-        expenses.push(make_expense(
-            user_id,
-            NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
-            Account::Cash,
-            "Deposits",
-            dec!(100.0),
-        ));
-        expenses.push(make_expense(
-            user_id,
-            NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
-            Account::Cash,
-            "Food",
-            dec!(-30.0),
-        ));
-        drop(expenses);
+        expense_service::import_csv(&state, user_id, OVERVIEW_CSV)
+            .await
+            .unwrap();
 
         let cmd = parse_command("stats").unwrap();
         match execute(&state, user_id, &cmd).await.unwrap() {
@@ -437,22 +406,9 @@ mod tests {
     #[tokio::test]
     async fn test_execute_stats_date_filter() {
         let (state, user_id) = registered_state().await;
-        let mut expenses = state.expenses.write().await;
-        expenses.push(make_expense(
-            user_id,
-            NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
-            Account::Cash,
-            "Food",
-            dec!(-50.0),
-        ));
-        expenses.push(make_expense(
-            user_id,
-            NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
-            Account::Cash,
-            "Food",
-            dec!(-30.0),
-        ));
-        drop(expenses);
+        expense_service::import_csv(&state, user_id, OVERVIEW_CSV)
+            .await
+            .unwrap();
 
         let cmd = parse_command("stats from 2026-05-01 to 2026-05-31").unwrap();
         match execute(&state, user_id, &cmd).await.unwrap() {

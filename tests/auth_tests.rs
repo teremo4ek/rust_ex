@@ -11,7 +11,7 @@ fn json_body(value: serde_json::Value) -> Body {
 
 #[tokio::test]
 async fn test_register() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
 
     let res = app
         .oneshot(
@@ -41,7 +41,7 @@ async fn test_register() {
 
 #[tokio::test]
 async fn test_register_duplicate_email() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
 
     let req_body = json!({"email": "dup@example.com", "password": "password123"});
     let body_bytes = serde_json::to_vec(&req_body).unwrap();
@@ -74,7 +74,7 @@ async fn test_register_duplicate_email() {
 
 #[tokio::test]
 async fn test_register_invalid_email() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
 
     let res = app
         .oneshot(
@@ -96,7 +96,7 @@ async fn test_register_invalid_email() {
 
 #[tokio::test]
 async fn test_register_short_password() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
 
     let res = app
         .oneshot(
@@ -118,13 +118,13 @@ async fn test_register_short_password() {
 
 #[tokio::test]
 async fn test_login() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     common::register_and_login(&app).await;
 }
 
 #[tokio::test]
 async fn test_login_wrong_password() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
     let _ = common::register_and_login(&app).await;
 
     let res = app
@@ -147,7 +147,7 @@ async fn test_login_wrong_password() {
 
 #[tokio::test]
 async fn test_login_nonexistent_user() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
 
     let res = app
         .oneshot(
@@ -169,7 +169,7 @@ async fn test_login_nonexistent_user() {
 
 #[tokio::test]
 async fn test_unauthorized_access() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
 
     let res = app
         .oneshot(
@@ -187,7 +187,7 @@ async fn test_unauthorized_access() {
 
 #[tokio::test]
 async fn test_health_check() {
-    let app = common::create_test_app();
+    let app = common::create_test_app().await;
 
     let res = app
         .oneshot(
