@@ -40,6 +40,7 @@ pub struct Expense {
     pub category: String,
     pub amount: Decimal,
     pub currency: String,
+    pub amount_usd: Option<Decimal>,
     pub description: String,
 }
 

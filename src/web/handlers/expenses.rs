@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::common::error::AppResult;
 use crate::common::models::dto::{ExpensesQuery, ExpensesResponse, UploadResponse};
-use crate::common::services::expense_service;
+use crate::common::services::{expense_service, usd_conversion};
 use crate::common::state::AppState;
 use crate::web::middleware::auth::AuthUser;
 
@@ -15,7 +15,15 @@ pub async fn upload(
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<UploadResponse>)> {
     let imported = expense_service::upload_csv(&state, auth.id, multipart).await?;
-    Ok((StatusCode::CREATED, Json(UploadResponse { imported })))
+    let report = usd_conversion::convert_to_usd(&state, auth.id).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(UploadResponse {
+            imported,
+            converted: report.converted,
+            skipped: report.skipped,
+        }),
+    ))
 }
 
 pub async fn list(

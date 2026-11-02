@@ -5,7 +5,8 @@ use axum::http::StatusCode;
 use tower::ServiceExt;
 
 async fn setup_with_expenses() -> (axum::Router, String, uuid::Uuid) {
-    let app = common::create_test_app().await;
+    let (app, state) = common::create_test_app_with_state().await;
+    common::seed_fixture_rates(&state, rust_decimal::dec!(2.8230)).await;
     let (token, user_id) = common::register_and_login(&app).await;
 
     let csv_content = include_str!("fixtures/monefy.csv");

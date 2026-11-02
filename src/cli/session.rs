@@ -205,6 +205,8 @@ fn read_line(
 mod tests {
     use super::*;
     use crate::common::config::Config;
+    use crate::common::services::usd_conversion;
+    use rust_decimal::dec;
 
     async fn run_script(script: &str) -> String {
         let state = AppState::from_config(&Config {
@@ -215,6 +217,7 @@ mod tests {
         })
         .await
         .unwrap();
+        usd_conversion::seed_usd_rates(&state, dec!(2.8230)).await;
         let mut input = script.as_bytes();
         let mut output = Vec::new();
         run(&mut input, &mut output, state).await.unwrap();
@@ -236,6 +239,7 @@ mod tests {
         )
         .await;
         assert!(out.contains("Imported 41 expenses from tests/fixtures/monefy.csv"));
+        assert!(out.contains("Converted 41 expenses to USD"));
         assert!(out.contains("Total income"));
         assert!(out.contains("Bye!"));
     }
