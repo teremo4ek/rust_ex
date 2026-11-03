@@ -131,6 +131,7 @@ mod tests {
             category: category.into(),
             amount,
             currency: "BYN".into(),
+            amount_usd: None,
             description: String::new(),
         }
     }

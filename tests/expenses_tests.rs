@@ -6,7 +6,8 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_upload_csv() {
-    let app = common::create_test_app().await;
+    let (app, state) = common::create_test_app_with_state().await;
+    common::seed_fixture_rates(&state, rust_decimal::dec!(2.8230)).await;
     let (token, _user_id) = common::register_and_login(&app).await;
 
     let csv_content = include_str!("fixtures/monefy.csv");
@@ -45,7 +46,9 @@ async fn test_upload_csv() {
             .unwrap(),
     )
     .unwrap();
-    assert!(body["imported"].as_u64().unwrap() > 0);
+    assert_eq!(body["imported"].as_u64().unwrap(), 41);
+    assert_eq!(body["converted"].as_u64().unwrap(), 40);
+    assert_eq!(body["skipped"].as_u64().unwrap(), 0);
 }
 
 #[tokio::test]

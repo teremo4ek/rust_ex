@@ -1,12 +1,11 @@
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn temp_db_url() -> (String, PathBuf) {
-    let path = std::env::temp_dir().join(format!(
-        "expense_tracker_test_{}.db",
-        uuid::Uuid::new_v4()
-    ));
+    let path =
+        std::env::temp_dir().join(format!("expense_tracker_test_{}.db", uuid::Uuid::new_v4()));
     (format!("sqlite:{}", path.display()), path)
 }
 
@@ -54,18 +53,43 @@ fn fixture_path() -> String {
         .to_string()
 }
 
-#[test]
-fn cli_happy_path() {
+async fn seed_fixture_rates(db_url: &str) {
+    let pool = expense_tracker::common::db::connect(db_url).await.unwrap();
+    let expenses = expense_tracker::common::services::expense_service::parse_csv(
+        include_str!("fixtures/monefy.csv"),
+        uuid::Uuid::new_v4(),
+    )
+    .unwrap();
+    let dates: BTreeSet<chrono::NaiveDate> = expenses.iter().map(|e| e.date).collect();
+    for date in dates {
+        sqlx::query(
+            "INSERT OR REPLACE INTO nbrb_rates (date, currency, base_currency, rate)
+             VALUES (?, 'USD', 'BYN', '2.8230')",
+        )
+        .bind(date)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn cli_happy_path() {
+    let (db_url, db_path) = temp_db_url();
+    seed_fixture_rates(&db_url).await;
     let script = format!(
         "2\nuser@example.com\npassword123\nupload {}\nstats\nexit\n",
         fixture_path()
     );
-    let (stdout, _stderr, code) = run_cli(&["cli"], &script);
+    let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
     assert_eq!(code, Some(0));
     assert!(stdout.contains("Registered and logged in as user@example.com"));
     assert!(stdout.contains("Imported 41 expenses"));
+    assert!(stdout.contains("Converted 40 expenses to USD"));
     assert!(stdout.contains("Total income"));
     assert!(stdout.contains("Bye!"));
+    cleanup_db(&db_path);
 }
 
 #[test]
@@ -101,9 +125,10 @@ fn cli_debug_user_option() {
     assert!(stdout.contains("No expenses found for the selected period."));
 }
 
-#[test]
-fn cli_data_persists_across_runs() {
+#[tokio::test]
+async fn cli_data_persists_across_runs() {
     let (db_url, db_path) = temp_db_url();
+    seed_fixture_rates(&db_url).await;
 
     let script = format!(
         "2\nuser@example.com\npassword123\nupload {}\nexit\n",
@@ -112,6 +137,7 @@ fn cli_data_persists_across_runs() {
     let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
     assert_eq!(code, Some(0));
     assert!(stdout.contains("Imported 41 expenses"));
+    assert!(stdout.contains("Converted 40 expenses to USD"));
 
     let (stdout, _stderr, code) = run_cli_with_db(
         &["cli"],

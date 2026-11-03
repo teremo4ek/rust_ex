@@ -25,6 +25,7 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 - Layout: `src/common` (shared: models, services, state, config, db, error), `src/web` (HTTP: routes, handlers, middleware), `src/cli` (console session). `src/main.rs` dispatches: no args → server, `cli` → console mode, anything else → usage + exit 2
 - Auth: custom `AuthUser` extractor in `src/web/middleware/auth.rs` validates JWT from `Authorization` header
 - CSV parsing: Monefy format, 8 columns with duplicate "currency" header — use `csv::StringRecord` manually, not serde deserialization (serde can't handle duplicate column names)
+- USD conversion: separate post-import step (`usd_conversion::convert_to_usd`, runs in web upload + CLI) fills `expenses.amount_usd` — BYN via the `nbrb_rates` cache (miss → NBRB `get_rate`), USD copies `amount`, other currencies stay NULL. Best-effort: failed dates stay NULL and retry on the next upload (`amount_usd IS NULL` = pending)
 - Error handling: all errors go through `AppError` in `src/common/error.rs` — add new variants there, never return raw library errors from handlers
 - Lib+bin layout: `src/lib.rs` exposes modules for integration tests, `src/main.rs` is dispatch + server startup
 
@@ -34,6 +35,7 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 - Integration tests: `tests/` directory, use `tower::ServiceExt::oneshot` with `axum::body::Body`
 - Test helper: `tests/common/mod.rs` — use `create_test_app()` (async; isolated `sqlite::memory:` pool) and `register_and_login()` for setup
 - Unit tests seed data via `register` + `import_csv` (AppState has no collections to poke); `tests/cli_tests.rs` injects a unique temp DB file per test via `Command::env("DATABASE_URL", ...)` — dotenvy never overrides preset env vars
+- Conversion tests stay offline: unit tests inject a rate fetcher into `usd_conversion::convert`; upload tests seed `nbrb_rates` first (in-crate: `usd_conversion::seed_usd_rates`; integration: `common::seed_fixture_rates`; CLI binary tests: `db::connect` on the temp DB before spawning)
 - Synthetic CSV fixture: `tests/fixtures/monefy.csv` — use it for upload and analytics tests
 - Each test file creates its own app instance (fresh state, no test pollution)
 
@@ -68,3 +70,5 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 - `sqlite::memory:` is private per connection: test pools need `max_connections(1)` with `idle_timeout`/`max_lifetime` disabled (`src/common/db.rs` handles this)
 - `foreign_keys` is per-connection — set via `SqliteConnectOptions` in `src/common/db.rs`, never a one-off PRAGMA
 - Migrations are embedded at compile time (`sqlx::migrate!`) — new migration files require a rebuild
+- `amount_usd` is Decimal-as-TEXT like `amount`; `nbrb_rates` caches `(date, currency, base_currency) → rate` as TEXT. A corrupt cached rate falls through to a refetch that overwrites it (`INSERT OR REPLACE`)
+- NBRB has a rate for every calendar date (weekends/holidays repeat the last set one), so no fallback walk-back; `get_rate` uses a shared reqwest client with a 10s timeout (it sits on the upload request path); `Decimal / 0` panics — conversion guards `rate > 0`

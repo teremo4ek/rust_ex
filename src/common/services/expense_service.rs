@@ -123,6 +123,7 @@ fn parse_record(record: &StringRecord, user_id: Uuid) -> AppResult<Expense> {
         category,
         amount,
         currency,
+        amount_usd: None,
         description,
     })
 }
@@ -136,6 +137,7 @@ struct ExpenseRow {
     category: String,
     amount: String,
     currency: String,
+    amount_usd: Option<String>,
     description: String,
 }
 
@@ -161,13 +163,18 @@ impl ExpenseRow {
                 .parse()
                 .map_err(|_| AppError::Database("invalid amount stored in expenses".into()))?,
             currency: self.currency,
+            amount_usd: self
+                .amount_usd
+                .map(|v| v.parse::<Decimal>())
+                .transpose()
+                .map_err(|_| AppError::Database("invalid amount_usd stored in expenses".into()))?,
             description: self.description,
         })
     }
 }
 
 const EXPENSE_COLUMNS: &str =
-    "id, user_id, date, account, category, amount, currency, description";
+    "id, user_id, date, account, category, amount, currency, amount_usd, description";
 
 fn push_filters<'a>(
     qb: &mut sqlx::QueryBuilder<'a, sqlx::Sqlite>,
@@ -378,6 +385,8 @@ date,account,category,amount,currency,converted amount,currency,description
             count_expenses(&state, user_id, &empty_query()).await.unwrap(),
             3
         );
+        let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
+        assert!(expenses.iter().all(|e| e.amount_usd.is_none()));
     }
 
     #[tokio::test]

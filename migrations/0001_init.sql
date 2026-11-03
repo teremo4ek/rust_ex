@@ -13,8 +13,17 @@ CREATE TABLE expenses (
     category TEXT NOT NULL,
     amount TEXT NOT NULL,
     currency TEXT NOT NULL,
+    amount_usd TEXT,
     description TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX idx_expenses_user_date ON expenses(user_id, date);
+
+CREATE TABLE nbrb_rates (
+    date TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    base_currency TEXT NOT NULL,
+    rate TEXT NOT NULL,
+    PRIMARY KEY (date, currency, base_currency)
+);
