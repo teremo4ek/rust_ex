@@ -14,12 +14,13 @@ pub async fn upload(
     auth: AuthUser,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<UploadResponse>)> {
-    let imported = expense_service::upload_csv(&state, auth.id, multipart).await?;
+    let import_report = expense_service::upload_csv(&state, auth.id, multipart).await?;
     let report = usd_conversion::convert_to_usd(&state, auth.id).await?;
     Ok((
         StatusCode::CREATED,
         Json(UploadResponse {
-            imported,
+            imported: import_report.imported,
+            duplicates: import_report.duplicates,
             converted: report.converted,
             skipped: report.skipped,
         }),

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::extract::Multipart;
 use chrono::NaiveDate;
 use csv::{ReaderBuilder, StringRecord};
@@ -9,11 +11,26 @@ use crate::common::models::dto::ExpensesQuery;
 use crate::common::models::{Account, Expense};
 use crate::common::state::AppState;
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ImportReport {
+    pub imported: usize,
+    pub duplicates: usize,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct DedupKey {
+    date: NaiveDate,
+    account: String,
+    category: String,
+    amount: Decimal,
+    currency: String,
+}
+
 pub async fn upload_csv(
     state: &AppState,
     user_id: Uuid,
     mut multipart: Multipart,
-) -> AppResult<usize> {
+) -> AppResult<ImportReport> {
     while let Some(field) = multipart.next_field().await? {
         let name = field.name().unwrap_or_default().to_string();
         if name != "file" {
@@ -30,11 +47,54 @@ pub async fn upload_csv(
     Err(AppError::BadRequest("no 'file' field in upload".into()))
 }
 
-pub async fn import_csv(state: &AppState, user_id: Uuid, content: &str) -> AppResult<usize> {
+pub async fn import_csv(
+    state: &AppState,
+    user_id: Uuid,
+    content: &str,
+) -> AppResult<ImportReport> {
     let expenses = parse_csv(content, user_id)?;
+    let mut report = ImportReport::default();
 
     let mut tx = state.pool.begin().await?;
+    let existing = sqlx::query_as::<_, (NaiveDate, String, String, String, String)>(
+        "SELECT date, account, category, amount, currency FROM expenses WHERE user_id = ?",
+    )
+    .bind(user_id.to_string())
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let mut counts: HashMap<DedupKey, usize> = HashMap::new();
+    for (date, account, category, amount, currency) in existing {
+        let amount: Decimal = amount
+            .parse()
+            .map_err(|_| AppError::Database("invalid amount stored in expenses".into()))?;
+        *counts
+            .entry(DedupKey {
+                date,
+                account,
+                category,
+                amount,
+                currency,
+            })
+            .or_insert(0) += 1;
+    }
+
     for expense in &expenses {
+        let key = DedupKey {
+            date: expense.date,
+            account: expense.account.to_string(),
+            category: expense.category.clone(),
+            amount: expense.amount,
+            currency: expense.currency.clone(),
+        };
+        if let Some(n) = counts.get_mut(&key)
+            && *n > 0
+        {
+            *n -= 1;
+            report.duplicates += 1;
+            continue;
+        }
+
         sqlx::query(
             "INSERT INTO expenses (id, user_id, date, account, category, amount, currency, description)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -49,10 +109,11 @@ pub async fn import_csv(state: &AppState, user_id: Uuid, content: &str) -> AppRe
         .bind(expense.description.clone())
         .execute(&mut *tx)
         .await?;
+        report.imported += 1;
     }
     tx.commit().await?;
 
-    Ok(expenses.len())
+    Ok(report)
 }
 
 pub fn parse_csv(content: &str, user_id: Uuid) -> AppResult<Vec<Expense>> {
@@ -112,7 +173,7 @@ fn parse_record(record: &StringRecord, user_id: Uuid) -> AppResult<Expense> {
         .parse()
         .map_err(|e| format!("invalid amount: {}", e))?;
 
-    let currency = record.get(4).unwrap_or_default().to_string();
+    let currency = record.get(4).unwrap_or_default().trim().to_string();
     let description = record.get(7).unwrap_or_default().trim().to_string();
 
     Ok(Expense {
@@ -379,14 +440,142 @@ date,account,category,amount,currency,converted amount,currency,description
     #[tokio::test]
     async fn test_import_csv_inserts_rows() {
         let (state, user_id) = registered_state().await;
-        let count = import_csv(&state, user_id, VALID_CSV).await.unwrap();
-        assert_eq!(count, 3);
+        let report = import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 3,
+                duplicates: 0
+            }
+        );
         assert_eq!(
             count_expenses(&state, user_id, &empty_query()).await.unwrap(),
             3
         );
         let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
         assert!(expenses.iter().all(|e| e.amount_usd.is_none()));
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_same_file_twice_skips_all() {
+        let (state, user_id) = registered_state().await;
+        import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        let report = import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 0,
+                duplicates: 3
+            }
+        );
+        assert_eq!(
+            count_expenses(&state, user_id, &empty_query()).await.unwrap(),
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_preserves_existing_description() {
+        let (state, user_id) = registered_state().await;
+        let seed = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,Food,-17.26,BYN,-17.26,BYN,Original
+";
+        import_csv(&state, user_id, seed).await.unwrap();
+        let report = import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 2,
+                duplicates: 1
+            }
+        );
+        let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
+        let seeded = expenses
+            .iter()
+            .find(|e| e.amount == dec!(-17.26))
+            .unwrap();
+        assert_eq!(seeded.description, "Original");
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_inserts_surplus_identical_rows() {
+        let (state, user_id) = registered_state().await;
+        let seed = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,Food,-2.2,BYN,-2.2,BYN,
+";
+        import_csv(&state, user_id, seed).await.unwrap();
+        let two_identical = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,Food,-2.2,BYN,-2.2,BYN,
+4/22/2026,Cash,Food,-2.2,BYN,-2.2,BYN,
+";
+        let report = import_csv(&state, user_id, two_identical)
+            .await
+            .unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 1,
+                duplicates: 1
+            }
+        );
+        assert_eq!(
+            count_expenses(&state, user_id, &empty_query()).await.unwrap(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_amount_scale_variant_is_duplicate() {
+        let (state, user_id) = registered_state().await;
+        sqlx::query(
+            "INSERT INTO expenses (id, user_id, date, account, category, amount, currency, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(user_id.to_string())
+        .bind(NaiveDate::from_ymd_opt(2026, 4, 22).unwrap())
+        .bind("Cash")
+        .bind("Food")
+        .bind("-17.260")
+        .bind("BYN")
+        .bind("")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        let report = import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 2,
+                duplicates: 1
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_dedup_scoped_to_user() {
+        let (state, user_id) = registered_state().await;
+        let (_token, other) = auth_service::register(
+            &state,
+            "other@example.com".into(),
+            "password123".into(),
+            &state.jwt_secret,
+            state.jwt_expires_in,
+        )
+        .await
+        .unwrap();
+        import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        let report = import_csv(&state, other.id, VALID_CSV).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 3,
+                duplicates: 0
+            }
+        );
     }
 
     #[tokio::test]

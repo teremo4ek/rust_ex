@@ -147,16 +147,22 @@ pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppR
         Command::Upload { path } => {
             let content = std::fs::read_to_string(path)
                 .map_err(|e| AppError::BadRequest(format!("cannot read '{path}': {e}")))?;
-            let count = expense_service::import_csv(state, user_id, &content).await?;
+            let import_report = expense_service::import_csv(state, user_id, &content).await?;
             let report = usd_conversion::convert_to_usd(state, user_id).await?;
             let mut output = format!(
-                "Imported {count} expenses from {path}\nConverted {} expenses to USD",
-                report.converted
+                "Imported {} expenses from {path}\nConverted {} expenses to USD",
+                import_report.imported, report.converted
             );
             if report.skipped > 0 {
                 output.push_str(&format!(
                     ", {} left unconverted (will retry on next upload)",
                     report.skipped
+                ));
+            }
+            if import_report.duplicates > 0 {
+                output.push_str(&format!(
+                    "\nSkipped {} duplicates (already imported)",
+                    import_report.duplicates
                 ));
             }
             Ok(Outcome::Output(output))
@@ -373,6 +379,21 @@ date,account,category,amount,currency,converted amount,currency,description
             Outcome::Output(text) => {
                 assert!(text.contains("Imported 41 expenses"));
                 assert!(text.contains("Converted 40 expenses to USD"));
+            }
+            Outcome::Exit => panic!("expected output"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_upload_fixture_twice_reports_duplicates() {
+        let (state, user_id) = registered_state().await;
+        usd_conversion::seed_usd_rates(&state, dec!(2.8230)).await;
+        let cmd = parse_command("upload tests/fixtures/monefy.csv").unwrap();
+        execute(&state, user_id, &cmd).await.unwrap();
+        match execute(&state, user_id, &cmd).await.unwrap() {
+            Outcome::Output(text) => {
+                assert!(text.contains("Imported 0 expenses"));
+                assert!(text.contains("Skipped 41 duplicates (already imported)"));
             }
             Outcome::Exit => panic!("expected output"),
         }

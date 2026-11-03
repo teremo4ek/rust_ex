@@ -51,6 +51,82 @@ async fn test_upload_csv() {
     assert_eq!(body["skipped"].as_u64().unwrap(), 0);
 }
 
+async fn upload_fixture(app: &axum::Router, token: &str) -> serde_json::Value {
+    let csv_content = include_str!("fixtures/monefy.csv");
+    let boundary = "test-boundary-dedup";
+    let body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"monefy.csv\"\r\n\
+         Content-Type: text/csv\r\n\
+         \r\n\
+         {csv_content}\r\n\
+         --{boundary}--\r\n"
+    );
+
+    let res = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/expenses/upload")
+                .header("authorization", common::auth_header(token))
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::CREATED);
+    serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn test_upload_csv_twice_second_is_all_duplicates() {
+    let (app, state) = common::create_test_app_with_state().await;
+    common::seed_fixture_rates(&state, rust_decimal::dec!(2.8230)).await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+
+    let first = upload_fixture(&app, &token).await;
+    assert_eq!(first["imported"].as_u64().unwrap(), 41);
+    assert_eq!(first["duplicates"].as_u64().unwrap(), 0);
+    assert_eq!(first["converted"].as_u64().unwrap(), 40);
+
+    let second = upload_fixture(&app, &token).await;
+    assert_eq!(second["imported"].as_u64().unwrap(), 0);
+    assert_eq!(second["duplicates"].as_u64().unwrap(), 41);
+    assert_eq!(second["converted"].as_u64().unwrap(), 0);
+    assert_eq!(second["skipped"].as_u64().unwrap(), 0);
+
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/api/expenses")
+                .header("authorization", common::auth_header(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["total"].as_u64().unwrap(), 41);
+    assert_eq!(body["expenses"].as_array().unwrap().len(), 41);
+}
+
 #[tokio::test]
 async fn test_upload_without_auth() {
     let app = common::create_test_app().await;

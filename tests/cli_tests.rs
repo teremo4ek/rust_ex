@@ -151,3 +151,30 @@ async fn cli_data_persists_across_runs() {
 
     cleanup_db(&db_path);
 }
+
+#[tokio::test]
+async fn cli_reupload_dedup() {
+    let (db_url, db_path) = temp_db_url();
+    seed_fixture_rates(&db_url).await;
+
+    let script = format!(
+        "2\nuser@example.com\npassword123\nupload {}\nexit\n",
+        fixture_path()
+    );
+    let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Imported 41 expenses"));
+    assert!(!stdout.contains("duplicates"));
+
+    let script = format!(
+        "1\nuser@example.com\npassword123\nupload {}\nstats\nexit\n",
+        fixture_path()
+    );
+    let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Imported 0 expenses"));
+    assert!(stdout.contains("Skipped 41 duplicates (already imported)"));
+    assert!(stdout.contains("Total income"));
+
+    cleanup_db(&db_path);
+}
