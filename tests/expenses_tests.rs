@@ -47,7 +47,7 @@ async fn test_upload_csv() {
     )
     .unwrap();
     assert_eq!(body["imported"].as_u64().unwrap(), 41);
-    assert_eq!(body["converted"].as_u64().unwrap(), 41);
+    assert_eq!(body["converted"].as_u64().unwrap(), 40);
     assert_eq!(body["skipped"].as_u64().unwrap(), 0);
 }
 

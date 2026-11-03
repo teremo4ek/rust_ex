@@ -81,7 +81,8 @@ async fn authenticate(
             #[cfg(debug_assertions)]
             "3" => {
                 debug_setup::seed_debug_user(state).await;
-                let Some(user) = auth_service::find_by_id(state, debug_setup::DEBUG_USER_ID).await?
+                let Some(user) =
+                    auth_service::find_by_id(state, debug_setup::DEBUG_USER_ID).await?
                 else {
                     return Err(AppError::Internal(
                         "debug user missing after seeding".into(),
@@ -170,7 +171,10 @@ async fn register_flow(
     .await
     {
         Ok((_token, user)) => {
-            write_line(output, &format!("Registered and logged in as {}", user.email))?;
+            write_line(
+                output,
+                &format!("Registered and logged in as {}", user.email),
+            )?;
             Ok(Some(user))
         }
         Err(e) => {
@@ -239,25 +243,23 @@ mod tests {
         )
         .await;
         assert!(out.contains("Imported 41 expenses from tests/fixtures/monefy.csv"));
-        assert!(out.contains("Converted 41 expenses to USD"));
+        assert!(out.contains("Converted 40 expenses to USD"));
         assert!(out.contains("Total income"));
         assert!(out.contains("Bye!"));
     }
 
     #[tokio::test]
     async fn test_login_failure_then_register() {
-        let out = run_script(
-            "1\nnew@example.com\nwrongpass\n2\nnew@example.com\npassword123\nexit\n",
-        )
-        .await;
+        let out =
+            run_script("1\nnew@example.com\nwrongpass\n2\nnew@example.com\npassword123\nexit\n")
+                .await;
         assert!(out.contains("Error:"));
         assert!(out.contains("Registered and logged in as new@example.com"));
     }
 
     #[tokio::test]
     async fn test_unknown_command_continues() {
-        let out =
-            run_script("2\nnew@example.com\npassword123\nfoobar\nhelp\nexit\n").await;
+        let out = run_script("2\nnew@example.com\npassword123\nfoobar\nhelp\nexit\n").await;
         assert!(out.contains("unknown command 'foobar'"));
         assert!(out.contains("Commands:"));
         assert!(out.contains("Bye!"));

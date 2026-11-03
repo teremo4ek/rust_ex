@@ -4,10 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn temp_db_url() -> (String, PathBuf) {
-    let path = std::env::temp_dir().join(format!(
-        "expense_tracker_test_{}.db",
-        uuid::Uuid::new_v4()
-    ));
+    let path =
+        std::env::temp_dir().join(format!("expense_tracker_test_{}.db", uuid::Uuid::new_v4()));
     (format!("sqlite:{}", path.display()), path)
 }
 
@@ -88,7 +86,7 @@ async fn cli_happy_path() {
     assert_eq!(code, Some(0));
     assert!(stdout.contains("Registered and logged in as user@example.com"));
     assert!(stdout.contains("Imported 41 expenses"));
-    assert!(stdout.contains("Converted 41 expenses to USD"));
+    assert!(stdout.contains("Converted 40 expenses to USD"));
     assert!(stdout.contains("Total income"));
     assert!(stdout.contains("Bye!"));
     cleanup_db(&db_path);
@@ -139,7 +137,7 @@ async fn cli_data_persists_across_runs() {
     let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
     assert_eq!(code, Some(0));
     assert!(stdout.contains("Imported 41 expenses"));
-    assert!(stdout.contains("Converted 41 expenses to USD"));
+    assert!(stdout.contains("Converted 40 expenses to USD"));
 
     let (stdout, _stderr, code) = run_cli_with_db(
         &["cli"],

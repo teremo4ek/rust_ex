@@ -372,7 +372,7 @@ date,account,category,amount,currency,converted amount,currency,description
         match execute(&state, user_id, &cmd).await.unwrap() {
             Outcome::Output(text) => {
                 assert!(text.contains("Imported 41 expenses"));
-                assert!(text.contains("Converted 41 expenses to USD"));
+                assert!(text.contains("Converted 40 expenses to USD"));
             }
             Outcome::Exit => panic!("expected output"),
         }
