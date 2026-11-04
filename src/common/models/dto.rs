@@ -39,6 +39,7 @@ pub struct ExpensesQuery {
 #[derive(Debug, Serialize)]
 pub struct UploadResponse {
     pub imported: usize,
+    pub duplicates: usize,
     pub converted: usize,
     pub skipped: usize,
 }
