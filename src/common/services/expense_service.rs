@@ -53,13 +53,21 @@ pub async fn import_csv(
     content: &str,
 ) -> AppResult<ImportReport> {
     let expenses = parse_csv(content, user_id)?;
+    if expenses.is_empty() {
+        return Ok(ImportReport::default());
+    }
+    let min_date = expenses.iter().map(|e| e.date).min().unwrap();
+    let max_date = expenses.iter().map(|e| e.date).max().unwrap();
     let mut report = ImportReport::default();
 
     let mut tx = state.pool.begin().await?;
     let existing = sqlx::query_as::<_, (NaiveDate, String, String, String, String)>(
-        "SELECT date, account, category, amount, currency FROM expenses WHERE user_id = ?",
+        "SELECT date, account, category, amount, currency FROM expenses
+         WHERE user_id = ? AND date BETWEEN ? AND ?",
     )
     .bind(user_id.to_string())
+    .bind(min_date)
+    .bind(max_date)
     .fetch_all(&mut *tx)
     .await?;
 
@@ -575,6 +583,54 @@ date,account,category,amount,currency,converted amount,currency,description
                 imported: 3,
                 duplicates: 0
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_dedup_ignores_rows_outside_csv_date_range() {
+        let (state, user_id) = registered_state().await;
+        sqlx::query(
+            "INSERT INTO expenses (id, user_id, date, account, category, amount, currency, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(user_id.to_string())
+        .bind(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+        .bind("Cash")
+        .bind("Food")
+        .bind("-17.26")
+        .bind("BYN")
+        .bind("")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        let report = import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 3,
+                duplicates: 0
+            }
+        );
+        let report = import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 0,
+                duplicates: 3
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_empty_csv_returns_zero_report() {
+        let (state, user_id) = registered_state().await;
+        let csv = "date,account,category,amount,currency,converted amount,currency,description\n";
+        let report = import_csv(&state, user_id, csv).await.unwrap();
+        assert_eq!(report, ImportReport::default());
+        assert_eq!(
+            count_expenses(&state, user_id, &empty_query()).await.unwrap(),
+            0
         );
     }
 
