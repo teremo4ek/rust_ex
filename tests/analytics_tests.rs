@@ -64,7 +64,7 @@ async fn test_summary() {
     )
     .unwrap();
     assert_eq!(body["total_income"].as_str().unwrap(), "793");
-    assert_eq!(body["total_expense"].as_str().unwrap(), "-559.17");
+    assert_eq!(body["total_expense"].as_str().unwrap(), "559.17");
     assert_eq!(body["net"].as_str().unwrap(), "233.83");
 }
 

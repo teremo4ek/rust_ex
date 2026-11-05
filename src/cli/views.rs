@@ -15,10 +15,9 @@ Commands:
 Dates are YYYY-MM-DD.";
 
 pub fn render_summary(s: &SummaryResponse) -> String {
-    // total_expense is stored negative; displayed as a positive magnitude
     let lines = [
         format!("{:<14}{:>12.2}", "Total income", s.total_income),
-        format!("{:<14}{:>12.2}", "Total expense", s.total_expense.abs()),
+        format!("{:<14}{:>12.2}", "Total expense", s.total_expense),
         format!("{:<14}{:>12.2}", "Net", s.net),
     ];
     lines.join("\n")
@@ -66,14 +65,13 @@ mod tests {
     fn test_render_summary() {
         let s = SummaryResponse {
             total_income: dec!(1000.0),
-            total_expense: dec!(-400.0),
+            total_expense: dec!(400.0),
             net: dec!(600.0),
         };
         let out = render_summary(&s);
         assert!(out.contains("1000.00"));
         assert!(out.contains("400.00"));
         assert!(out.contains("600.00"));
-        assert!(!out.contains("-400.00"));
     }
 
     #[test]

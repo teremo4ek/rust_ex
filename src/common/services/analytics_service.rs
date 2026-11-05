@@ -2,7 +2,7 @@ use chrono::{Datelike, Duration, NaiveDate};
 use rust_decimal::{Decimal, dec};
 use std::collections::HashMap;
 
-use crate::common::models::Expense;
+use crate::common::models::{Expense, TransactionKind};
 use crate::common::models::dto::{
     AccountBreakdown, CategoryBreakdown, SummaryResponse, TimelinePoint,
 };
@@ -10,32 +10,32 @@ use crate::common::models::dto::{
 pub fn summary(expenses: &[Expense]) -> SummaryResponse {
     let total_income: Decimal = expenses
         .iter()
-        .filter(|e| e.is_income())
+        .filter(|e| e.kind == TransactionKind::Income)
         .map(|e| e.amount)
         .sum();
     let total_expense: Decimal = expenses
         .iter()
-        .filter(|e| e.is_expense())
+        .filter(|e| e.kind == TransactionKind::Expense)
         .map(|e| e.amount)
         .sum();
 
     SummaryResponse {
         total_income,
         total_expense,
-        net: total_income + total_expense,
+        net: total_income - total_expense,
     }
 }
 
 pub fn by_category(expenses: &[Expense]) -> Vec<CategoryBreakdown> {
     let total: Decimal = expenses
         .iter()
-        .filter(|e| e.is_expense())
-        .map(|e| e.amount.abs())
+        .filter(|e| e.kind == TransactionKind::Expense)
+        .map(|e| e.amount)
         .sum();
 
     let mut by_cat: HashMap<String, Decimal> = HashMap::new();
-    for e in expenses.iter().filter(|e| e.is_expense()) {
-        *by_cat.entry(e.category.clone()).or_default() += e.amount.abs();
+    for e in expenses.iter().filter(|e| e.kind == TransactionKind::Expense) {
+        *by_cat.entry(e.category.clone()).or_default() += e.amount;
     }
 
     let mut result: Vec<CategoryBreakdown> = by_cat
@@ -70,10 +70,10 @@ pub fn by_account(expenses: &[Expense]) -> Vec<AccountBreakdown> {
                 expense: Decimal::ZERO,
             });
 
-        if e.is_income() {
+        if e.kind == TransactionKind::Income {
             entry.income += e.amount;
         } else {
-            entry.expense += e.amount.abs();
+            entry.expense += e.amount;
         }
     }
 
@@ -92,10 +92,10 @@ pub fn timeline(expenses: &[Expense], group_by: &str) -> Vec<TimelinePoint> {
         };
 
         let entry = points.entry(period).or_default();
-        if e.is_income() {
+        if e.kind == TransactionKind::Income {
             entry.0 += e.amount;
         } else {
-            entry.1 += e.amount.abs();
+            entry.1 += e.amount;
         }
     }
 
@@ -122,7 +122,13 @@ mod tests {
     use super::*;
     use crate::common::models::Account;
 
-    fn make_expense(date: &str, category: &str, account: Account, amount: Decimal) -> Expense {
+    fn make_expense(
+        date: &str,
+        category: &str,
+        account: Account,
+        amount: Decimal,
+        kind: TransactionKind,
+    ) -> Expense {
         Expense {
             id: uuid::Uuid::new_v4(),
             user_id: uuid::Uuid::new_v4(),
@@ -130,6 +136,7 @@ mod tests {
             account,
             category: category.into(),
             amount,
+            kind,
             currency: "BYN".into(),
             amount_usd: None,
             description: String::new(),
@@ -139,22 +146,40 @@ mod tests {
     #[test]
     fn test_summary() {
         let expenses = vec![
-            make_expense("4/22/2026", "Food", Account::Cash, dec!(-50.0)),
-            make_expense("4/22/2026", "Deposits", Account::Cash, dec!(100.0)),
-            make_expense("4/23/2026", "Food", Account::PaymentCard, dec!(-30.0)),
+            make_expense("4/22/2026", "Food", Account::Cash, dec!(50.0), TransactionKind::Expense),
+            make_expense(
+                "4/22/2026",
+                "Deposits",
+                Account::Cash,
+                dec!(100.0),
+                TransactionKind::Income,
+            ),
+            make_expense(
+                "4/23/2026",
+                "Food",
+                Account::PaymentCard,
+                dec!(30.0),
+                TransactionKind::Expense,
+            ),
         ];
         let result = summary(&expenses);
         assert_eq!(result.total_income, dec!(100));
-        assert_eq!(result.total_expense, dec!(-80));
+        assert_eq!(result.total_expense, dec!(80));
         assert_eq!(result.net, dec!(20));
     }
 
     #[test]
     fn test_by_category() {
         let expenses = vec![
-            make_expense("4/22/2026", "Food", Account::Cash, dec!(-60.0)),
-            make_expense("4/22/2026", "Food", Account::Cash, dec!(-40.0)),
-            make_expense("4/22/2026", "Transport", Account::Cash, dec!(-50.0)),
+            make_expense("4/22/2026", "Food", Account::Cash, dec!(60.0), TransactionKind::Expense),
+            make_expense("4/22/2026", "Food", Account::Cash, dec!(40.0), TransactionKind::Expense),
+            make_expense(
+                "4/22/2026",
+                "Transport",
+                Account::Cash,
+                dec!(50.0),
+                TransactionKind::Expense,
+            ),
         ];
         let result = by_category(&expenses);
         assert_eq!(result.len(), 2);
@@ -168,9 +193,21 @@ mod tests {
     #[test]
     fn test_by_account() {
         let expenses = vec![
-            make_expense("4/22/2026", "Food", Account::Cash, dec!(-30.0)),
-            make_expense("4/22/2026", "Deposits", Account::Cash, dec!(50.0)),
-            make_expense("4/22/2026", "Food", Account::PaymentCard, dec!(-20.0)),
+            make_expense("4/22/2026", "Food", Account::Cash, dec!(30.0), TransactionKind::Expense),
+            make_expense(
+                "4/22/2026",
+                "Deposits",
+                Account::Cash,
+                dec!(50.0),
+                TransactionKind::Income,
+            ),
+            make_expense(
+                "4/22/2026",
+                "Food",
+                Account::PaymentCard,
+                dec!(20.0),
+                TransactionKind::Expense,
+            ),
         ];
         let result = by_account(&expenses);
         assert_eq!(result.len(), 2);
@@ -179,9 +216,15 @@ mod tests {
     #[test]
     fn test_timeline_day() {
         let expenses = vec![
-            make_expense("4/22/2026", "Food", Account::Cash, dec!(-30.0)),
-            make_expense("4/22/2026", "Deposits", Account::Cash, dec!(50.0)),
-            make_expense("4/23/2026", "Food", Account::Cash, dec!(-20.0)),
+            make_expense("4/22/2026", "Food", Account::Cash, dec!(30.0), TransactionKind::Expense),
+            make_expense(
+                "4/22/2026",
+                "Deposits",
+                Account::Cash,
+                dec!(50.0),
+                TransactionKind::Income,
+            ),
+            make_expense("4/23/2026", "Food", Account::Cash, dec!(20.0), TransactionKind::Expense),
         ];
         let result = timeline(&expenses, "day");
         assert_eq!(result.len(), 2);
