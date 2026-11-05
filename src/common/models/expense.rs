@@ -31,6 +31,34 @@ impl std::str::FromStr for Account {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransactionKind {
+    Expense,
+    Income,
+}
+
+impl std::fmt::Display for TransactionKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransactionKind::Expense => write!(f, "expense"),
+            TransactionKind::Income => write!(f, "income"),
+        }
+    }
+}
+
+impl std::str::FromStr for TransactionKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "expense" => Ok(TransactionKind::Expense),
+            "income" => Ok(TransactionKind::Income),
+            _ => Err(format!("unknown kind: {}", s)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Expense {
     pub id: Uuid,
@@ -39,17 +67,8 @@ pub struct Expense {
     pub account: Account,
     pub category: String,
     pub amount: Decimal,
+    pub kind: TransactionKind,
     pub currency: String,
     pub amount_usd: Option<Decimal>,
     pub description: String,
-}
-
-impl Expense {
-    pub fn is_income(&self) -> bool {
-        self.amount > Decimal::ZERO
-    }
-
-    pub fn is_expense(&self) -> bool {
-        self.amount < Decimal::ZERO
-    }
 }

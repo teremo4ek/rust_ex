@@ -12,6 +12,7 @@ CREATE TABLE expenses (
     account TEXT NOT NULL,
     category TEXT NOT NULL,
     amount TEXT NOT NULL,
+    kind TEXT NOT NULL,
     currency TEXT NOT NULL,
     amount_usd TEXT,
     description TEXT NOT NULL DEFAULT '',

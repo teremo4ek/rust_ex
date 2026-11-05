@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
-use crate::common::models::{Account, Expense};
+use crate::common::models::{Account, Expense, TransactionKind};
 use crate::common::state::AppState;
 
 use super::expense_service::{self, ImportReport};
@@ -142,7 +142,8 @@ pub fn parse_receipt(text: &str, user_id: Uuid) -> AppResult<Vec<Expense>> {
             date,
             account,
             category: "Groceries".to_string(),
-            amount: -line_total,
+            amount: line_total,
+            kind: TransactionKind::Expense,
             currency: "BYN".to_string(),
             amount_usd: None,
             description: name,
@@ -432,7 +433,7 @@ mod tests {
         let amounts: Vec<Decimal> = expenses.iter().map(|e| e.amount).collect();
         assert_eq!(
             amounts,
-            vec![dec!(-1.24), dec!(-2.99), dec!(-3.99), dec!(-3.29)]
+            vec![dec!(1.24), dec!(2.99), dec!(3.99), dec!(3.29)]
         );
         assert_eq!(expenses[0].description, "Яблоко РБ 1кг");
         assert_eq!(
@@ -440,6 +441,7 @@ mod tests {
             "Мак.изд. \"BONERO\" (спагетти) 400г"
         );
         assert!(expenses.iter().all(|e| e.category == "Groceries"));
+        assert!(expenses.iter().all(|e| e.kind == TransactionKind::Expense));
         assert!(expenses.iter().all(|e| e.currency == "BYN"));
         assert!(expenses.iter().all(|e| e.account == Account::PaymentCard));
         assert!(
@@ -465,12 +467,12 @@ mod tests {
         assert_eq!(
             amounts,
             vec![
-                dec!(-1.73),
-                dec!(-1.12),
-                dec!(-1.64),
-                dec!(-2.56),
-                dec!(-4.84),
-                dec!(-2.84)
+                dec!(1.73),
+                dec!(1.12),
+                dec!(1.64),
+                dec!(2.56),
+                dec!(4.84),
+                dec!(2.84)
             ]
         );
         assert!(expenses.iter().all(|e| e.account == Account::PaymentCard));
@@ -486,7 +488,7 @@ mod tests {
         let text = "1000001\nЯблоко РБ 1кг\n1.00            х1            1.00\n\nИТОГО К ОПЛАТЕ                                                            1.00\n02-11-2026 18:34\n";
         let expenses = parse_receipt(text, Uuid::new_v4()).unwrap();
         assert_eq!(expenses.len(), 1);
-        assert_eq!(expenses[0].amount, dec!(-1));
+        assert_eq!(expenses[0].amount, dec!(1));
         assert_eq!(expenses[0].description, "Яблоко РБ 1кг");
     }
 
@@ -542,7 +544,7 @@ mod tests {
         let expenses = parse_receipt(&text, Uuid::new_v4()).unwrap();
         assert_eq!(expenses.len(), 4);
         let sum: Decimal = expenses.iter().map(|e| e.amount).sum();
-        assert_eq!(sum, dec!(-11.51));
+        assert_eq!(sum, dec!(11.51));
     }
 
     #[test]
@@ -552,7 +554,7 @@ mod tests {
         let expenses = parse_receipt(&text, Uuid::new_v4()).unwrap();
         assert_eq!(expenses.len(), 6);
         let sum: Decimal = expenses.iter().map(|e| e.amount).sum();
-        assert_eq!(sum, dec!(-14.73));
+        assert_eq!(sum, dec!(14.73));
     }
 
     #[tokio::test]

@@ -50,12 +50,12 @@ Query parameters for expenses list: `from`, `to`, `category`, `account`, `page`,
 
 ## Money in JSON
 
-Amounts are stored and aggregated with `rust_decimal` (exact decimal arithmetic). Money fields in JSON responses are strings, preserving exactness:
+Amounts are stored and aggregated with `rust_decimal` (exact decimal arithmetic). All amounts are positive; the `kind` field (`expense` or `income`) tells the direction. Money fields in JSON responses are strings, preserving exactness:
 
 ```json
 {
   "total_income": "793",
-  "total_expense": "-559.17",
+  "total_expense": "559.17",
   "net": "233.83"
 }
 ```
@@ -90,7 +90,7 @@ date,account,category,amount,currency,converted amount,currency,description
 ```
 
 - Date format: `M/D/YYYY`
-- Negative `amount` = expense, positive = income
+- Negative `amount` = expense, positive = income (import normalizes rows to a positive `amount` plus a `kind` of `expense` or `income`)
 - Categories: any non-empty category from the export is accepted (Monefy defaults and custom ones, e.g. "Eating out")
 - Supported accounts: Cash, Payment card
 

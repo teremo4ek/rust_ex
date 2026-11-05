@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
 use crate::common::models::dto::ExpensesQuery;
-use crate::common::models::{Account, Expense};
+use crate::common::models::{Account, Expense, TransactionKind};
 use crate::common::state::AppState;
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -23,6 +23,7 @@ struct DedupKey {
     account: String,
     category: String,
     amount: Decimal,
+    kind: TransactionKind,
     currency: String,
 }
 
@@ -65,8 +66,8 @@ pub async fn import_csv(
     let mut report = ImportReport::default();
 
     let mut tx = state.pool.begin().await?;
-    let existing = sqlx::query_as::<_, (NaiveDate, String, String, String, String)>(
-        "SELECT date, account, category, amount, currency FROM expenses
+    let existing = sqlx::query_as::<_, (NaiveDate, String, String, String, String, String)>(
+        "SELECT date, account, category, amount, kind, currency FROM expenses
          WHERE user_id = ? AND date BETWEEN ? AND ?",
     )
     .bind(user_id.to_string())
@@ -76,16 +77,20 @@ pub async fn import_csv(
     .await?;
 
     let mut counts: HashMap<DedupKey, usize> = HashMap::new();
-    for (date, account, category, amount, currency) in existing {
+    for (date, account, category, amount, kind, currency) in existing {
         let amount: Decimal = amount
             .parse()
             .map_err(|_| AppError::Database("invalid amount stored in expenses".into()))?;
+        let kind: TransactionKind = kind
+            .parse()
+            .map_err(|_| AppError::Database("invalid kind stored in expenses".into()))?;
         *counts
             .entry(DedupKey {
                 date,
                 account,
                 category,
                 amount,
+                kind,
                 currency,
             })
             .or_insert(0) += 1;
@@ -97,6 +102,7 @@ pub async fn import_csv(
             account: expense.account.to_string(),
             category: expense.category.clone(),
             amount: expense.amount,
+            kind: expense.kind,
             currency: expense.currency.clone(),
         };
         if let Some(n) = counts.get_mut(&key)
@@ -120,8 +126,8 @@ pub(crate) async fn insert_expense(
     expense: &Expense,
 ) -> AppResult<()> {
     sqlx::query(
-        "INSERT INTO expenses (id, user_id, date, account, category, amount, currency, description)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO expenses (id, user_id, date, account, category, amount, kind, currency, description)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(expense.id.to_string())
     .bind(expense.user_id.to_string())
@@ -129,6 +135,7 @@ pub(crate) async fn insert_expense(
     .bind(expense.account.to_string())
     .bind(expense.category.clone())
     .bind(expense.amount.to_string())
+    .bind(expense.kind.to_string())
     .bind(expense.currency.clone())
     .bind(expense.description.clone())
     .execute(&mut **tx)
@@ -187,11 +194,17 @@ fn parse_record(record: &StringRecord, user_id: Uuid) -> AppResult<Expense> {
         return Err(AppError::BadRequest("empty category field".into()));
     }
 
-    let amount: Decimal = record
+    let parsed: Decimal = record
         .get(3)
         .unwrap_or_default()
         .parse()
         .map_err(|e| format!("invalid amount: {}", e))?;
+    let kind = if parsed < Decimal::ZERO {
+        TransactionKind::Expense
+    } else {
+        TransactionKind::Income
+    };
+    let amount = parsed.abs();
 
     let currency = record.get(4).unwrap_or_default().trim().to_string();
     let description = record.get(7).unwrap_or_default().trim().to_string();
@@ -203,6 +216,7 @@ fn parse_record(record: &StringRecord, user_id: Uuid) -> AppResult<Expense> {
         account,
         category,
         amount,
+        kind,
         currency,
         amount_usd: None,
         description,
@@ -217,6 +231,7 @@ struct ExpenseRow {
     account: String,
     category: String,
     amount: String,
+    kind: String,
     currency: String,
     amount_usd: Option<String>,
     description: String,
@@ -243,6 +258,10 @@ impl ExpenseRow {
                 .amount
                 .parse()
                 .map_err(|_| AppError::Database("invalid amount stored in expenses".into()))?,
+            kind: self
+                .kind
+                .parse()
+                .map_err(|_| AppError::Database("invalid kind stored in expenses".into()))?,
             currency: self.currency,
             amount_usd: self
                 .amount_usd
@@ -255,7 +274,7 @@ impl ExpenseRow {
 }
 
 const EXPENSE_COLUMNS: &str =
-    "id, user_id, date, account, category, amount, currency, amount_usd, description";
+    "id, user_id, date, account, category, amount, kind, currency, amount_usd, description";
 
 fn push_filters<'a>(
     qb: &mut sqlx::QueryBuilder<'a, sqlx::Sqlite>,
@@ -375,9 +394,11 @@ date,account,category,amount,currency,converted amount,currency,description
         let expenses = parse_csv(VALID_CSV, user_id).unwrap();
         assert_eq!(expenses.len(), 3);
         assert_eq!(expenses[0].category, "Food");
-        assert_eq!(expenses[0].amount, dec!(-17.26));
+        assert_eq!(expenses[0].amount, dec!(17.26));
+        assert_eq!(expenses[0].kind, TransactionKind::Expense);
         assert_eq!(expenses[2].category, "Deposits");
-        assert!(expenses[2].is_income());
+        assert_eq!(expenses[2].amount, dec!(100));
+        assert_eq!(expenses[2].kind, TransactionKind::Income);
     }
 
     #[test]
@@ -513,7 +534,7 @@ date,account,category,amount,currency,converted amount,currency,description
         let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
         let seeded = expenses
             .iter()
-            .find(|e| e.amount == dec!(-17.26))
+            .find(|e| e.amount == dec!(17.26))
             .unwrap();
         assert_eq!(seeded.description, "Original");
     }
@@ -551,15 +572,16 @@ date,account,category,amount,currency,converted amount,currency,description
     async fn test_import_csv_amount_scale_variant_is_duplicate() {
         let (state, user_id) = registered_state().await;
         sqlx::query(
-            "INSERT INTO expenses (id, user_id, date, account, category, amount, currency, description)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO expenses (id, user_id, date, account, category, amount, kind, currency, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(Uuid::new_v4().to_string())
         .bind(user_id.to_string())
         .bind(NaiveDate::from_ymd_opt(2026, 4, 22).unwrap())
         .bind("Cash")
         .bind("Food")
-        .bind("-17.260")
+        .bind("17.260")
+        .bind("expense")
         .bind("BYN")
         .bind("")
         .execute(&state.pool)
@@ -571,6 +593,39 @@ date,account,category,amount,currency,converted amount,currency,description
             ImportReport {
                 imported: 2,
                 duplicates: 1
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_income_does_not_dedup_against_expense() {
+        let (state, user_id) = registered_state().await;
+        sqlx::query(
+            "INSERT INTO expenses (id, user_id, date, account, category, amount, kind, currency, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(user_id.to_string())
+        .bind(NaiveDate::from_ymd_opt(2026, 4, 22).unwrap())
+        .bind("Cash")
+        .bind("Food")
+        .bind("100")
+        .bind("expense")
+        .bind("BYN")
+        .bind("")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,Food,100,BYN,100,BYN,Refund
+";
+        let report = import_csv(&state, user_id, csv).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 1,
+                duplicates: 0
             }
         );
     }
@@ -602,15 +657,16 @@ date,account,category,amount,currency,converted amount,currency,description
     async fn test_import_csv_dedup_ignores_rows_outside_csv_date_range() {
         let (state, user_id) = registered_state().await;
         sqlx::query(
-            "INSERT INTO expenses (id, user_id, date, account, category, amount, currency, description)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO expenses (id, user_id, date, account, category, amount, kind, currency, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(Uuid::new_v4().to_string())
         .bind(user_id.to_string())
         .bind(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
         .bind("Cash")
         .bind("Food")
-        .bind("-17.26")
+        .bind("17.26")
+        .bind("expense")
         .bind("BYN")
         .bind("")
         .execute(&state.pool)

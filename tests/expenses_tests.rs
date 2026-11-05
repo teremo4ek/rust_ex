@@ -125,6 +125,22 @@ async fn test_upload_csv_twice_second_is_all_duplicates() {
     .unwrap();
     assert_eq!(body["total"].as_u64().unwrap(), 41);
     assert_eq!(body["expenses"].as_array().unwrap().len(), 41);
+    assert_eq!(body["expenses"][0]["amount"].as_str().unwrap(), "17.26");
+    assert_eq!(body["expenses"][0]["kind"].as_str().unwrap(), "expense");
+    assert!(
+        body["expenses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["amount"].as_str().is_some_and(|a| !a.starts_with('-')))
+    );
+    assert!(
+        body["expenses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| matches!(e["kind"].as_str(), Some("expense") | Some("income")))
+    );
 }
 
 #[tokio::test]
