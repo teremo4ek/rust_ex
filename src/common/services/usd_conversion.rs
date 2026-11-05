@@ -139,6 +139,11 @@ pub(crate) async fn seed_usd_rates(state: &AppState, rate: Decimal) {
 }
 
 #[cfg(test)]
+pub(crate) async fn seed_usd_rate_for(state: &AppState, date: NaiveDate, rate: Decimal) {
+    store_rate(state, date, rate).await.unwrap();
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::common::config::Config;

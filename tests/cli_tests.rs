@@ -53,6 +53,27 @@ fn fixture_path() -> String {
         .to_string()
 }
 
+fn pdf_fixture_path() -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/check.pdf")
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn seed_rate_for(db_url: &str, date: chrono::NaiveDate) {
+    let pool = expense_tracker::common::db::connect(db_url).await.unwrap();
+    sqlx::query(
+        "INSERT OR REPLACE INTO nbrb_rates (date, currency, base_currency, rate)
+         VALUES (?, 'USD', 'BYN', '2.8230')",
+    )
+    .bind(date)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
 async fn seed_fixture_rates(db_url: &str) {
     let pool = expense_tracker::common::db::connect(db_url).await.unwrap();
     let expenses = expense_tracker::common::services::expense_service::parse_csv(
@@ -149,6 +170,26 @@ async fn cli_data_persists_across_runs() {
     assert!(stdout.contains("Total income"));
     assert!(!stdout.contains("No expenses found"));
 
+    cleanup_db(&db_path);
+}
+
+#[tokio::test]
+async fn cli_upload_pdf_receipt() {
+    let (db_url, db_path) = temp_db_url();
+    seed_rate_for(
+        &db_url,
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
+    )
+    .await;
+    let script = format!(
+        "2\nuser@example.com\npassword123\nupload {}\nstats\nexit\n",
+        pdf_fixture_path()
+    );
+    let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Imported 4 expenses"));
+    assert!(stdout.contains("Converted 4 expenses to USD"));
+    assert!(stdout.contains("Groceries"));
     cleanup_db(&db_path);
 }
 

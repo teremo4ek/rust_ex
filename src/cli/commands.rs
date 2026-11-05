@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
-use crate::common::services::{analytics_service, expense_service, usd_conversion};
+use crate::common::services::{analytics_service, expense_service, receipt_service, usd_conversion};
 use crate::common::state::AppState;
 
 use super::views;
@@ -145,9 +145,16 @@ fn parse_stats(rest: &str) -> AppResult<Command> {
 pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppResult<Outcome> {
     match command {
         Command::Upload { path } => {
-            let content = std::fs::read_to_string(path)
+            let data = std::fs::read(path)
                 .map_err(|e| AppError::BadRequest(format!("cannot read '{path}': {e}")))?;
-            let import_report = expense_service::import_csv(state, user_id, &content).await?;
+            let import_report = if data.starts_with(b"%PDF-") {
+                receipt_service::import_receipt(state, user_id, &data).await?
+            } else {
+                let content = String::from_utf8(data).map_err(|_| {
+                    AppError::BadRequest(format!("'{path}' is not a PDF or UTF-8 CSV"))
+                })?;
+                expense_service::import_csv(state, user_id, &content).await?
+            };
             let report = usd_conversion::convert_to_usd(state, user_id).await?;
             let mut output = format!(
                 "Imported {} expenses from {path}\nConverted {} expenses to USD",
@@ -394,6 +401,25 @@ date,account,category,amount,currency,converted amount,currency,description
             Outcome::Output(text) => {
                 assert!(text.contains("Imported 0 expenses"));
                 assert!(text.contains("Skipped 41 duplicates (already imported)"));
+            }
+            Outcome::Exit => panic!("expected output"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_upload_receipt_fixture() {
+        let (state, user_id) = registered_state().await;
+        usd_conversion::seed_usd_rate_for(
+            &state,
+            NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
+            dec!(2.8230),
+        )
+        .await;
+        let cmd = parse_command("upload tests/fixtures/check.pdf").unwrap();
+        match execute(&state, user_id, &cmd).await.unwrap() {
+            Outcome::Output(text) => {
+                assert!(text.contains("Imported 4 expenses"));
+                assert!(text.contains("Converted 4 expenses to USD"));
             }
             Outcome::Exit => panic!("expected output"),
         }

@@ -1,6 +1,6 @@
 # Expense Tracker API
 
-A production-ready REST API for tracking and analyzing personal expenses. Upload CSV files exported from [Monefy](https://www.monefy.app/) and get aggregated analytics via JSON endpoints.
+A production-ready REST API for tracking and analyzing personal expenses. Upload CSV files exported from [Monefy](https://www.monefy.app/) or Euroopt receipt PDFs and get aggregated analytics via JSON endpoints.
 
 Built with Rust to practice async programming, web frameworks, and modern Rust patterns.
 
@@ -31,7 +31,7 @@ Built with Rust to practice async programming, web frameworks, and modern Rust p
 
 | Method   | Path                   | Description                               |
 | -------- | ---------------------- | ----------------------------------------- |
-| `POST`   | `/api/expenses/upload` | Upload a Monefy CSV file                  |
+| `POST`   | `/api/expenses/upload` | Upload a Monefy CSV file or a Euroopt receipt PDF |
 | `GET`    | `/api/expenses`        | List expenses with filters and pagination |
 | `DELETE` | `/api/expenses/{id}`   | Delete an expense                         |
 
@@ -94,6 +94,10 @@ date,account,category,amount,currency,converted amount,currency,description
 - Categories: any non-empty category from the export is accepted (Monefy defaults and custom ones, e.g. "Eating out")
 - Supported accounts: Cash, Payment card
 
+## Receipt PDFs
+
+`upload` also accepts Euroopt receipt PDFs (FastReport exports with a text layer — no OCR). Each line item becomes an expense with category `Groceries`, currency `BYN`, and the item name as the description; a per-item `Скидка` line is subtracted from the line total, and the receipt total is cross-checked against the sum of the items. Requires `pdftotext` (poppler) on `PATH`. Re-uploading the same receipt inserts the items again — PDF imports are not deduplicated yet.
+
 ## Example Usage
 
 ```bash
@@ -135,7 +139,7 @@ cargo run -- cli
 
 | Command                              | Description                            |
 | ------------------------------------ | -------------------------------------- |
-| `upload <path>`                      | Import a Monefy CSV file               |
+| `upload <path>`                      | Import a Monefy CSV or Euroopt receipt PDF |
 | `stats`                              | Overview: summary + category breakdown |
 | `stats summary / category / account` | Single view                            |
 | `stats timeline [day\|week]`         | Spending over time                     |
@@ -173,13 +177,14 @@ tests/
 ├── expenses_tests.rs       # expenses tests
 ├── analytics_tests.rs      # analytics tests
 ├── cli_tests.rs            # CLI integration tests (spawn the binary)
-└── fixtures/monefy.csv     # sample CSV for tests
+├── fixtures/monefy.csv     # sample CSV for tests
+└── fixtures/check.pdf      # Euroopt receipt for tests
 ```
 
 ## Testing
 
-- **44 unit tests** — CSV parsing, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
-- **25 integration tests** — 19 web flows via `tower::ServiceExt::oneshot`, 6 CLI flows by spawning the real binary (including data persistence across runs)
+- **74 unit tests** — CSV and receipt parsing, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
+- **30 integration tests** — 22 web flows via `tower::ServiceExt::oneshot`, 8 CLI flows by spawning the real binary (including data persistence across runs)
 
 ```sh
 cargo test              # run all tests

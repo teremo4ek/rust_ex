@@ -204,6 +204,97 @@ async fn test_list_expenses_with_category_filter() {
 }
 
 #[tokio::test]
+async fn test_upload_pdf_receipt() {
+    let (app, state) = common::create_test_app_with_state().await;
+    sqlx::query(
+        "INSERT OR REPLACE INTO nbrb_rates (date, currency, base_currency, rate)
+         VALUES (?, 'USD', 'BYN', '2.8230')",
+    )
+    .bind(chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap())
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let (token, _user_id) = common::register_and_login(&app).await;
+
+    let pdf = include_bytes!("fixtures/check.pdf");
+    let boundary = "test-boundary-pdf";
+    let mut body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"check.pdf\"\r\n\
+         Content-Type: application/pdf\r\n\
+         \r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(pdf);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    let res = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/expenses/upload")
+                .header("authorization", common::auth_header(&token))
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["imported"].as_u64().unwrap(), 4);
+    assert_eq!(body["duplicates"].as_u64().unwrap(), 0);
+    assert_eq!(body["converted"].as_u64().unwrap(), 4);
+    assert_eq!(body["skipped"].as_u64().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn test_upload_corrupt_pdf_returns_bad_request() {
+    let app = common::create_test_app().await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+
+    let pdf = b"%PDF- definitely corrupt";
+    let boundary = "test-boundary-corrupt-pdf";
+    let mut body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"corrupt.pdf\"\r\n\
+         Content-Type: application/pdf\r\n\
+         \r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(pdf);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/expenses/upload")
+                .header("authorization", common::auth_header(&token))
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn test_upload_rejects_non_finite_amount() {
     let app = common::create_test_app().await;
     let (token, _user_id) = common::register_and_login(&app).await;
