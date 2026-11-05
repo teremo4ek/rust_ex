@@ -26,7 +26,7 @@ struct DedupKey {
     currency: String,
 }
 
-pub async fn upload_csv(
+pub async fn upload(
     state: &AppState,
     user_id: Uuid,
     mut multipart: Multipart,
@@ -38,6 +38,10 @@ pub async fn upload_csv(
         }
 
         let data = field.bytes().await?;
+        if data.starts_with(b"%PDF-") {
+            return super::receipt_service::import_receipt(state, user_id, &data).await;
+        }
+
         let content = String::from_utf8(data.to_vec())
             .map_err(|_| AppError::BadRequest("CSV file must be UTF-8".into()))?;
 
@@ -103,25 +107,33 @@ pub async fn import_csv(
             continue;
         }
 
-        sqlx::query(
-            "INSERT INTO expenses (id, user_id, date, account, category, amount, currency, description)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(expense.id.to_string())
-        .bind(expense.user_id.to_string())
-        .bind(expense.date)
-        .bind(expense.account.to_string())
-        .bind(expense.category.clone())
-        .bind(expense.amount.to_string())
-        .bind(expense.currency.clone())
-        .bind(expense.description.clone())
-        .execute(&mut *tx)
-        .await?;
+        insert_expense(&mut tx, expense).await?;
         report.imported += 1;
     }
     tx.commit().await?;
 
     Ok(report)
+}
+
+pub(crate) async fn insert_expense(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    expense: &Expense,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO expenses (id, user_id, date, account, category, amount, currency, description)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(expense.id.to_string())
+    .bind(expense.user_id.to_string())
+    .bind(expense.date)
+    .bind(expense.account.to_string())
+    .bind(expense.category.clone())
+    .bind(expense.amount.to_string())
+    .bind(expense.currency.clone())
+    .bind(expense.description.clone())
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 pub fn parse_csv(content: &str, user_id: Uuid) -> AppResult<Vec<Expense>> {

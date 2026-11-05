@@ -4,7 +4,7 @@ use crate::common::models::{
 
 pub const HELP: &str = "\
 Commands:
-  upload <path>                                        import a Monefy CSV file
+  upload <path>                                        import a Monefy CSV or Euroopt receipt PDF
   stats [from <date>] [to <date>]                      overview: summary + category breakdown
   stats summary [from <date>] [to <date>]              totals
   stats category [from <date>] [to <date>]             spending by category
