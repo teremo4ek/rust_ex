@@ -1,9 +1,10 @@
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use validator::Validate;
 
-use super::{PublicUser, Expense};
+use super::{PublicUser, Expense, Receipt, ReceiptStatus};
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct RegisterRequest {
@@ -40,8 +41,26 @@ pub struct ExpensesQuery {
 pub struct UploadResponse {
     pub imported: usize,
     pub duplicates: usize,
+    pub receipts_attached: usize,
     pub converted: usize,
     pub skipped: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReceiptUploadResponse {
+    pub status: ReceiptStatus,
+    pub date: NaiveDate,
+    pub total: Decimal,
+    pub currency: String,
+    pub item_count: usize,
+    pub expense_id: Option<Uuid>,
+    pub converted: usize,
+    pub skipped: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PendingReceiptsResponse {
+    pub receipts: Vec<Receipt>,
 }
 
 #[derive(Debug, Serialize)]

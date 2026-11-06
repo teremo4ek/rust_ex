@@ -61,6 +61,14 @@ fn pdf_fixture_path() -> String {
         .to_string()
 }
 
+fn receipt_match_fixture_path() -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/receipt_match.csv")
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
 async fn seed_rate_for(db_url: &str, date: chrono::NaiveDate) {
     let pool = expense_tracker::common::db::connect(db_url).await.unwrap();
     sqlx::query(
@@ -176,20 +184,67 @@ async fn cli_data_persists_across_runs() {
 #[tokio::test]
 async fn cli_upload_pdf_receipt() {
     let (db_url, db_path) = temp_db_url();
-    seed_rate_for(
-        &db_url,
-        chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
-    )
-    .await;
     let script = format!(
         "2\nuser@example.com\npassword123\nupload {}\nstats\nexit\n",
         pdf_fixture_path()
     );
     let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
     assert_eq!(code, Some(0));
-    assert!(stdout.contains("Imported 4 expenses"));
-    assert!(stdout.contains("Converted 4 expenses to USD"));
-    assert!(stdout.contains("Groceries"));
+    assert!(stdout.contains(
+        "No matching expense for receipt 2026-11-02, 11.51 BYN — saved as pending, will attach when the CSV row is imported"
+    ));
+    assert!(!stdout.contains("Groceries"));
+    cleanup_db(&db_path);
+}
+
+#[tokio::test]
+async fn cli_receipt_pending_then_csv_attach() {
+    let (db_url, db_path) = temp_db_url();
+    seed_rate_for(
+        &db_url,
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
+    )
+    .await;
+
+    let script = format!(
+        "2\nuser@example.com\npassword123\nupload {}\nreceipts\nexit\n",
+        pdf_fixture_path()
+    );
+    let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains(
+        "No matching expense for receipt 2026-11-02, 11.51 BYN — saved as pending, will attach when the CSV row is imported"
+    ));
+    assert!(stdout.contains("2026-11-02"));
+    assert!(stdout.contains("11.51"));
+
+    let script = format!(
+        "1\nuser@example.com\npassword123\nupload {}\nreceipts\nexit\n",
+        receipt_match_fixture_path()
+    );
+    let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Imported 1 expenses"));
+    assert!(stdout.contains("Converted 1 expenses to USD"));
+    assert!(stdout.contains("Attached 1 pending receipts to matching expenses"));
+    assert!(stdout.contains("No pending receipts."));
+
+    cleanup_db(&db_path);
+}
+
+#[tokio::test]
+async fn cli_receipts_lists_pending() {
+    let (db_url, db_path) = temp_db_url();
+    let script = format!(
+        "2\nuser@example.com\npassword123\nupload {}\nreceipts\nexit\n",
+        pdf_fixture_path()
+    );
+    let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Date"));
+    assert!(stdout.contains("2026-11-02"));
+    assert!(stdout.contains("11.51"));
+    assert!(stdout.contains("Payment card"));
     cleanup_db(&db_path);
 }
 

@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
 use crate::common::models::dto::ExpensesQuery;
+use crate::common::models::receipt::ReceiptReport;
 use crate::common::models::{Account, Expense, TransactionKind};
 use crate::common::state::AppState;
 
@@ -15,6 +16,13 @@ use crate::common::state::AppState;
 pub struct ImportReport {
     pub imported: usize,
     pub duplicates: usize,
+    pub receipts_attached: usize,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum UploadOutcome {
+    Csv(ImportReport),
+    Receipt(ReceiptReport),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -31,7 +39,7 @@ pub async fn upload(
     state: &AppState,
     user_id: Uuid,
     mut multipart: Multipart,
-) -> AppResult<ImportReport> {
+) -> AppResult<UploadOutcome> {
     while let Some(field) = multipart.next_field().await? {
         let name = field.name().unwrap_or_default().to_string();
         if name != "file" {
@@ -40,13 +48,15 @@ pub async fn upload(
 
         let data = field.bytes().await?;
         if data.starts_with(b"%PDF-") {
-            return super::receipt_service::import_receipt(state, user_id, &data).await;
+            let report = super::receipt_service::import_receipt(state, user_id, &data).await?;
+            return Ok(UploadOutcome::Receipt(report));
         }
 
         let content = String::from_utf8(data.to_vec())
             .map_err(|_| AppError::BadRequest("CSV file must be UTF-8".into()))?;
 
-        return import_csv(state, user_id, &content).await;
+        let report = import_csv(state, user_id, &content).await?;
+        return Ok(UploadOutcome::Csv(report));
     }
 
     Err(AppError::BadRequest("no 'file' field in upload".into()))
@@ -116,6 +126,8 @@ pub async fn import_csv(
         insert_expense(&mut tx, expense).await?;
         report.imported += 1;
     }
+    report.receipts_attached =
+        super::receipt_service::attach_pending_receipts(&mut tx, user_id).await?;
     tx.commit().await?;
 
     Ok(report)
@@ -486,7 +498,8 @@ date,account,category,amount,currency,converted amount,currency,description
             report,
             ImportReport {
                 imported: 3,
-                duplicates: 0
+                duplicates: 0,
+                receipts_attached: 0
             }
         );
         assert_eq!(
@@ -506,7 +519,8 @@ date,account,category,amount,currency,converted amount,currency,description
             report,
             ImportReport {
                 imported: 0,
-                duplicates: 3
+                duplicates: 3,
+                receipts_attached: 0
             }
         );
         assert_eq!(
@@ -528,7 +542,8 @@ date,account,category,amount,currency,converted amount,currency,description
             report,
             ImportReport {
                 imported: 2,
-                duplicates: 1
+                duplicates: 1,
+                receipts_attached: 0
             }
         );
         let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
@@ -559,7 +574,8 @@ date,account,category,amount,currency,converted amount,currency,description
             report,
             ImportReport {
                 imported: 1,
-                duplicates: 1
+                duplicates: 1,
+                receipts_attached: 0
             }
         );
         assert_eq!(
@@ -592,7 +608,8 @@ date,account,category,amount,currency,converted amount,currency,description
             report,
             ImportReport {
                 imported: 2,
-                duplicates: 1
+                duplicates: 1,
+                receipts_attached: 0
             }
         );
     }
@@ -625,7 +642,8 @@ date,account,category,amount,currency,converted amount,currency,description
             report,
             ImportReport {
                 imported: 1,
-                duplicates: 0
+                duplicates: 0,
+                receipts_attached: 0
             }
         );
     }
@@ -648,7 +666,8 @@ date,account,category,amount,currency,converted amount,currency,description
             report,
             ImportReport {
                 imported: 3,
-                duplicates: 0
+                duplicates: 0,
+                receipts_attached: 0
             }
         );
     }
@@ -677,7 +696,8 @@ date,account,category,amount,currency,converted amount,currency,description
             report,
             ImportReport {
                 imported: 3,
-                duplicates: 0
+                duplicates: 0,
+                receipts_attached: 0
             }
         );
         let report = import_csv(&state, user_id, VALID_CSV).await.unwrap();
@@ -685,7 +705,8 @@ date,account,category,amount,currency,converted amount,currency,description
             report,
             ImportReport {
                 imported: 0,
-                duplicates: 3
+                duplicates: 3,
+                receipts_attached: 0
             }
         );
     }
@@ -714,6 +735,37 @@ not-a-date,Cash,Food,-10,BYN,-10,BYN,Test
         assert_eq!(
             count_expenses(&state, user_id, &empty_query()).await.unwrap(),
             0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_import_csv_attaches_pending_receipt() {
+        let (state, user_id) = registered_state().await;
+        let pdf = include_bytes!("../../../tests/fixtures/check.pdf");
+        crate::common::services::receipt_service::import_receipt(&state, user_id, pdf)
+            .await
+            .unwrap();
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+11/2/2026,Payment card,Food,-11.51,BYN,-11.51,BYN,Euroopt
+";
+        let report = import_csv(&state, user_id, csv).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 1,
+                duplicates: 0,
+                receipts_attached: 1
+            }
+        );
+        let report = import_csv(&state, user_id, csv).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport {
+                imported: 0,
+                duplicates: 1,
+                receipts_attached: 0
+            }
         );
     }
 }

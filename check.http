@@ -29,3 +29,16 @@ curl http://localhost:3000/api/analytics/by-category?from=2026-04-01&to=2026-04-
 ### Get daily timeline
 curl http://localhost:3000/api/analytics/timeline?group_by=day \
   -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4"
+
+### Upload Euroopt receipt PDF
+curl -X POST http://localhost:3000/api/expenses/upload \
+  -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4" \
+  -F "file=@tests/fixtures/check.pdf"
+
+### Get pending receipts
+curl http://localhost:3000/api/receipts/pending \
+  -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4"
+
+### Get receipt items of an expense
+curl http://localhost:3000/api/expenses/<expense-id>/receipt \
+  -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4"
