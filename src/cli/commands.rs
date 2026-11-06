@@ -2,7 +2,9 @@ use chrono::NaiveDate;
 use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
-use crate::common::services::{analytics_service, expense_service, receipt_service, usd_conversion};
+use crate::common::models::ReceiptStatus;
+use crate::common::services::expense_service::{self, UploadOutcome};
+use crate::common::services::{analytics_service, receipt_service};
 use crate::common::state::AppState;
 
 use super::views;
@@ -17,6 +19,7 @@ pub enum Command {
         from: Option<NaiveDate>,
         to: Option<NaiveDate>,
     },
+    Receipts,
     Help,
     Exit,
 }
@@ -62,6 +65,7 @@ pub fn parse_command(line: &str) -> AppResult<Command> {
             })
         }
         "stats" => parse_stats(rest),
+        "receipts" => Ok(Command::Receipts),
         "help" => Ok(Command::Help),
         "exit" | "quit" => Ok(Command::Exit),
         other => Err(AppError::BadRequest(format!(
@@ -147,31 +151,65 @@ pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppR
         Command::Upload { path } => {
             let data = std::fs::read(path)
                 .map_err(|e| AppError::BadRequest(format!("cannot read '{path}': {e}")))?;
-            let import_report = if data.starts_with(b"%PDF-") {
-                receipt_service::import_receipt(state, user_id, &data).await?
-            } else {
-                let content = String::from_utf8(data).map_err(|_| {
-                    AppError::BadRequest(format!("'{path}' is not a PDF or UTF-8 CSV"))
-                })?;
-                expense_service::import_csv(state, user_id, &content).await?
+            let (outcome, conversion) =
+                expense_service::import_bytes(state, user_id, &data).await?;
+            let output = match outcome {
+                UploadOutcome::Receipt(receipt) => {
+                    let mut output = match receipt.status {
+                        ReceiptStatus::Attached => format!(
+                            "Receipt {}, {} {}, {} items attached to matching expense",
+                            receipt.date, receipt.total, receipt.currency, receipt.item_count
+                        ),
+                        ReceiptStatus::Pending => format!(
+                            "No matching expense for receipt {}, {} {} — saved as pending, will attach when the CSV row is imported",
+                            receipt.date, receipt.total, receipt.currency
+                        ),
+                        ReceiptStatus::Duplicate => {
+                            let suffix = if receipt.expense_id.is_some() {
+                                " (attached to an expense)"
+                            } else {
+                                " (still pending)"
+                            };
+                            format!(
+                                "Receipt already uploaded: {}, {} {}{}",
+                                receipt.date, receipt.total, receipt.currency, suffix
+                            )
+                        }
+                    };
+                    if conversion.converted > 0 {
+                        output.push_str(&format!(
+                            "\nConverted {} expenses to USD",
+                            conversion.converted
+                        ));
+                    }
+                    output
+                }
+                UploadOutcome::Csv(import_report) => {
+                    let mut output = format!(
+                        "Imported {} expenses from {path}\nConverted {} expenses to USD",
+                        import_report.imported, conversion.converted
+                    );
+                    if conversion.skipped > 0 {
+                        output.push_str(&format!(
+                            ", {} left unconverted (will retry on next upload)",
+                            conversion.skipped
+                        ));
+                    }
+                    if import_report.duplicates > 0 {
+                        output.push_str(&format!(
+                            "\nSkipped {} duplicates (already imported)",
+                            import_report.duplicates
+                        ));
+                    }
+                    if import_report.receipts_attached > 0 {
+                        output.push_str(&format!(
+                            "\nAttached {} pending receipts to matching expenses",
+                            import_report.receipts_attached
+                        ));
+                    }
+                    output
+                }
             };
-            let report = usd_conversion::convert_to_usd(state, user_id).await?;
-            let mut output = format!(
-                "Imported {} expenses from {path}\nConverted {} expenses to USD",
-                import_report.imported, report.converted
-            );
-            if report.skipped > 0 {
-                output.push_str(&format!(
-                    ", {} left unconverted (will retry on next upload)",
-                    report.skipped
-                ));
-            }
-            if import_report.duplicates > 0 {
-                output.push_str(&format!(
-                    "\nSkipped {} duplicates (already imported)",
-                    import_report.duplicates
-                ));
-            }
             Ok(Outcome::Output(output))
         }
         Command::Stats { view, from, to } => {
@@ -206,6 +244,13 @@ pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppR
             };
             Ok(Outcome::Output(rendered))
         }
+        Command::Receipts => {
+            let receipts = receipt_service::list_pending_receipts(state, user_id).await?;
+            if receipts.is_empty() {
+                return Ok(Outcome::Output("No pending receipts.".into()));
+            }
+            Ok(Outcome::Output(views::render_pending_receipts(&receipts)))
+        }
         Command::Help => Ok(Outcome::Output(views::HELP.to_string())),
         Command::Exit => Ok(Outcome::Exit),
     }
@@ -216,6 +261,7 @@ mod tests {
     use super::*;
     use crate::common::config::Config;
     use crate::common::services::auth_service;
+    use crate::common::services::usd_conversion;
     use rust_decimal::dec;
 
     async fn test_state() -> AppState {
@@ -409,17 +455,86 @@ date,account,category,amount,currency,converted amount,currency,description
     #[tokio::test]
     async fn test_execute_upload_receipt_fixture() {
         let (state, user_id) = registered_state().await;
-        usd_conversion::seed_usd_rate_for(
+        let cmd = parse_command("upload tests/fixtures/check.pdf").unwrap();
+        match execute(&state, user_id, &cmd).await.unwrap() {
+            Outcome::Output(text) => {
+                assert!(text.contains(
+                    "No matching expense for receipt 2026-11-02, 11.51 BYN — saved as pending, will attach when the CSV row is imported"
+                ));
+            }
+            Outcome::Exit => panic!("expected output"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_upload_receipt_attaches_after_csv() {
+        let (state, user_id) = registered_state().await;
+        usd_conversion::seed_usd_rate(
             &state,
             NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
             dec!(2.8230),
         )
         .await;
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+11/2/2026,Payment card,Food,-11.51,BYN,-11.51,BYN,Euroopt
+";
+        expense_service::import_csv(&state, user_id, csv)
+            .await
+            .unwrap();
         let cmd = parse_command("upload tests/fixtures/check.pdf").unwrap();
         match execute(&state, user_id, &cmd).await.unwrap() {
             Outcome::Output(text) => {
-                assert!(text.contains("Imported 4 expenses"));
-                assert!(text.contains("Converted 4 expenses to USD"));
+                assert!(text.contains(
+                    "Receipt 2026-11-02, 11.51 BYN, 4 items attached to matching expense"
+                ));
+            }
+            Outcome::Exit => panic!("expected output"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_upload_receipt_twice_reports_duplicate() {
+        let (state, user_id) = registered_state().await;
+        let cmd = parse_command("upload tests/fixtures/check.pdf").unwrap();
+        execute(&state, user_id, &cmd).await.unwrap();
+        match execute(&state, user_id, &cmd).await.unwrap() {
+            Outcome::Output(text) => {
+                assert!(
+                    text.contains("Receipt already uploaded: 2026-11-02, 11.51 BYN (still pending)")
+                );
+            }
+            Outcome::Exit => panic!("expected output"),
+        }
+    }
+
+    #[test]
+    fn test_parse_receipts_command() {
+        assert!(matches!(
+            parse_command("receipts").unwrap(),
+            Command::Receipts
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_execute_receipts_command_empty() {
+        let (state, user_id) = registered_state().await;
+        match execute(&state, user_id, &Command::Receipts).await.unwrap() {
+            Outcome::Output(text) => assert_eq!(text, "No pending receipts."),
+            Outcome::Exit => panic!("expected output"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_receipts_command_lists_pending() {
+        let (state, user_id) = registered_state().await;
+        let cmd = parse_command("upload tests/fixtures/check.pdf").unwrap();
+        execute(&state, user_id, &cmd).await.unwrap();
+        match execute(&state, user_id, &Command::Receipts).await.unwrap() {
+            Outcome::Output(text) => {
+                assert!(text.contains("2026-11-02"));
+                assert!(text.contains("11.51"));
+                assert!(text.contains("Payment card"));
             }
             Outcome::Exit => panic!("expected output"),
         }

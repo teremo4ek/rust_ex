@@ -29,11 +29,13 @@ Built with Rust to practice async programming, web frameworks, and modern Rust p
 
 ### Protected (require `Authorization: Bearer <token>`)
 
-| Method   | Path                   | Description                               |
-| -------- | ---------------------- | ----------------------------------------- |
-| `POST`   | `/api/expenses/upload` | Upload a Monefy CSV file or a Euroopt receipt PDF |
-| `GET`    | `/api/expenses`        | List expenses with filters and pagination |
-| `DELETE` | `/api/expenses/{id}`   | Delete an expense                         |
+| Method   | Path                          | Description                                        |
+| -------- | ----------------------------- | -------------------------------------------------- |
+| `POST`   | `/api/expenses/upload`        | Upload a Monefy CSV file or a Euroopt receipt PDF  |
+| `GET`    | `/api/expenses`               | List expenses with filters and pagination          |
+| `DELETE` | `/api/expenses/{id}`          | Delete an expense                                  |
+| `GET`    | `/api/expenses/{id}/receipt`  | Receipt line items attached to an expense          |
+| `GET`    | `/api/receipts/pending`       | Receipts stored but not yet matched to an expense  |
 
 ### Analytics (require `Authorization: Bearer <token>`)
 
@@ -96,7 +98,33 @@ date,account,category,amount,currency,converted amount,currency,description
 
 ## Receipt PDFs
 
-`upload` also accepts Euroopt receipt PDFs (FastReport exports with a text layer — no OCR). Each line item becomes an expense with category `Groceries`, currency `BYN`, and the item name as the description; a per-item `Скидка` line is subtracted from the line total, and the receipt total is cross-checked against the sum of the items. Requires `pdftotext` (poppler) on `PATH`. Re-uploading the same receipt inserts the items again — PDF imports are not deduplicated yet.
+`upload` also accepts Euroopt receipt PDFs (FastReport exports with a text layer — no OCR). Requires `pdftotext` (poppler) on `PATH`.
+
+Receipts **never create or modify transactions** — the CSV stays the single source of truth for balances and analytics. A receipt *enriches* an existing expense:
+
+1. The parser extracts the date, total, account (card vs cash), the unique fiscal id (`УИ`), and every line item (code, name, unit price, quantity, discount, line total); the items sum is cross-checked against the receipt total.
+2. The receipt is matched against the user's expenses by date + amount == total (`kind = expense`, currency `BYN`, no receipt attached yet); the first match in insertion order wins.
+3. Exactly one match → the items are stored as a sub-table under that expense (`GET /api/expenses/{id}/receipt` returns them).
+4. No match → the receipt is stored as **pending** with a clear warning (`GET /api/receipts/pending`, CLI `receipts`); every later CSV import retries matching and reports `receipts_attached`.
+5. Re-uploading a receipt with the same `УИ` is reported as a duplicate; if the stored copy is still pending, the re-upload retries matching it against a free expense.
+6. Deleting an expense reverts its receipt to pending (`ON DELETE SET NULL`), so it re-attaches when the CSV row reappears.
+
+PDF upload response example:
+
+```json
+{
+  "status": "attached",
+  "date": "2026-11-02",
+  "total": "11.51",
+  "currency": "BYN",
+  "item_count": 4,
+  "expense_id": "0b0e8b4e-…",
+  "converted": 0,
+  "skipped": 0
+}
+```
+
+`status` is `attached`, `pending`, or `duplicate`.
 
 ## Example Usage
 
@@ -137,14 +165,15 @@ An interactive console session with the same data pipeline, no web server requir
 cargo run -- cli
 ```
 
-| Command                              | Description                            |
-| ------------------------------------ | -------------------------------------- |
-| `upload <path>`                      | Import a Monefy CSV or Euroopt receipt PDF |
-| `stats`                              | Overview: summary + category breakdown |
-| `stats summary / category / account` | Single view                            |
-| `stats timeline [day\|week]`         | Spending over time                     |
-| `from <date>` / `to <date>`          | Optional date filters (YYYY-MM-DD)     |
-| `help` / `exit`                      | Usage / quit                           |
+| Command                              | Description                                          |
+| ------------------------------------ | ---------------------------------------------------- |
+| `upload <path>`                      | Import a Monefy CSV or Euroopt receipt PDF           |
+| `stats`                              | Overview: summary + category breakdown               |
+| `stats summary / category / account` | Single view                                          |
+| `stats timeline [day\|week]`         | Spending over time                                   |
+| `receipts`                           | Show pending receipts (waiting for a matching CSV import) |
+| `from <date>` / `to <date>`          | Optional date filters (YYYY-MM-DD)                   |
+| `help` / `exit`                      | Usage / quit                                         |
 
 Data persists in the SQLite database across runs: the CLI loads `.env` and requires `DATABASE_URL` exactly like the server; no HTTP listener is started.
 
@@ -172,19 +201,21 @@ src/
     └── views.rs            # text table rendering
 
 tests/
-├── common/mod.rs           # test helpers
-├── auth_tests.rs           # authentication tests
-├── expenses_tests.rs       # expenses tests
-├── analytics_tests.rs      # analytics tests
-├── cli_tests.rs            # CLI integration tests (spawn the binary)
-├── fixtures/monefy.csv     # sample CSV for tests
-└── fixtures/check.pdf      # Euroopt receipt for tests
+├── common/mod.rs               # test helpers
+├── auth_tests.rs               # authentication tests
+├── expenses_tests.rs           # expenses + receipt upload tests
+├── analytics_tests.rs          # analytics tests
+├── cli_tests.rs                # CLI integration tests (spawn the binary)
+├── fixtures/monefy.csv         # sample CSV for tests
+├── fixtures/receipt_match.csv  # one-row CSV matching check.pdf by date + total
+├── fixtures/check.pdf          # Euroopt receipt for tests
+└── fixtures/check2.pdf         # Euroopt receipt with per-item discounts
 ```
 
 ## Testing
 
-- **74 unit tests** — CSV and receipt parsing, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
-- **30 integration tests** — 22 web flows via `tower::ServiceExt::oneshot`, 8 CLI flows by spawning the real binary (including data persistence across runs)
+- **89 unit tests** — CSV and receipt parsing, receipt matching, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
+- **35 integration tests** — 25 web flows via `tower::ServiceExt::oneshot`, 10 CLI flows by spawning the real binary (including data persistence across runs)
 
 ```sh
 cargo test              # run all tests

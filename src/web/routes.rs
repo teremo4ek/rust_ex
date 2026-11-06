@@ -11,6 +11,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/expenses/upload", post(handlers::expenses::upload))
         .route("/api/expenses", get(handlers::expenses::list))
         .route("/api/expenses/{id}", delete(handlers::expenses::delete))
+        .route(
+            "/api/expenses/{id}/receipt",
+            get(handlers::expenses::expense_receipt),
+        )
+        .route("/api/receipts/pending", get(handlers::receipts::pending))
         .route("/api/analytics/summary", get(handlers::analytics::summary))
         .route("/api/analytics/by-category", get(handlers::analytics::by_category))
         .route("/api/analytics/by-account", get(handlers::analytics::by_account))

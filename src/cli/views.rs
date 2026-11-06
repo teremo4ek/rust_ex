@@ -1,5 +1,5 @@
 use crate::common::models::{
-    AccountBreakdown, CategoryBreakdown, SummaryResponse, TimelinePoint,
+    AccountBreakdown, CategoryBreakdown, Receipt, SummaryResponse, TimelinePoint,
 };
 
 pub const HELP: &str = "\
@@ -10,6 +10,7 @@ Commands:
   stats category [from <date>] [to <date>]             spending by category
   stats account [from <date>] [to <date>]              income/expense by account
   stats timeline [day|week] [from <date>] [to <date>]  spending over time
+  receipts                                             show pending receipts (waiting for a matching CSV import)
   help                                                 show this help
   exit                                                 quit
 Dates are YYYY-MM-DD.";
@@ -51,6 +52,20 @@ pub fn render_timeline(rows: &[TimelinePoint]) -> String {
         lines.push(format!(
             "{:<25}{:>10.2}{:>10.2}",
             row.period, row.income, row.expense
+        ));
+    }
+    lines.join("\n")
+}
+
+pub fn render_pending_receipts(receipts: &[Receipt]) -> String {
+    let mut lines = vec![format!(
+        "{:<12}{:>8}  {:>5}  {}",
+        "Date", "Total", "Items", "Account"
+    )];
+    for receipt in receipts {
+        lines.push(format!(
+            "{:<12}{:>8}  {:>5}  {}",
+            receipt.date, receipt.total, receipt.items.len(), receipt.account
         ));
     }
     lines.join("\n")
@@ -114,5 +129,46 @@ mod tests {
         assert!(out.contains("2026-01-05 - 2026-01-11"));
         assert!(out.contains("100.00"));
         assert!(out.contains("50.00"));
+    }
+
+    #[test]
+    fn test_render_pending_receipts() {
+        let receipts = vec![Receipt {
+            id: uuid::Uuid::new_v4(),
+            user_id: uuid::Uuid::new_v4(),
+            expense_id: None,
+            date: chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
+            total: dec!(11.51),
+            currency: "BYN".into(),
+            account: crate::common::models::Account::PaymentCard,
+            fiscal_id: "EDDA8397564658AE0718A4AB".into(),
+            items: vec![
+                crate::common::models::ReceiptItem {
+                    receipt_id: uuid::Uuid::new_v4(),
+                    position: 0,
+                    code: "1000001".into(),
+                    name: "Яблоко РБ 1кг".into(),
+                    unit_price: dec!(1.16),
+                    quantity: dec!(1.072),
+                    discount: dec!(0),
+                    total: dec!(1.24),
+                },
+                crate::common::models::ReceiptItem {
+                    receipt_id: uuid::Uuid::new_v4(),
+                    position: 1,
+                    code: "2000002".into(),
+                    name: "Риет-салат".into(),
+                    unit_price: dec!(2.99),
+                    quantity: dec!(1),
+                    discount: dec!(0),
+                    total: dec!(2.99),
+                },
+            ],
+        }];
+        let out = render_pending_receipts(&receipts);
+        assert!(out.contains("Date"));
+        assert!(out.contains("2026-11-02"));
+        assert!(out.contains("11.51"));
+        assert!(out.contains("Payment card"));
     }
 }
