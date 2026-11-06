@@ -44,6 +44,7 @@ pub struct ReceiptReport {
 
 #[derive(Debug, Serialize)]
 pub struct ReceiptItem {
+    #[serde(skip)]
     pub receipt_id: Uuid,
     pub position: i64,
     pub code: String,

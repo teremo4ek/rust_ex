@@ -126,6 +126,11 @@ async fn store_rate(state: &AppState, date: NaiveDate, rate: Decimal) -> AppResu
 }
 
 #[cfg(test)]
+pub(crate) async fn seed_usd_rate(state: &AppState, date: NaiveDate, rate: Decimal) {
+    store_rate(state, date, rate).await.unwrap();
+}
+
+#[cfg(test)]
 pub(crate) async fn seed_usd_rates(state: &AppState, rate: Decimal) {
     let expenses = crate::common::services::expense_service::parse_csv(
         include_str!("../../../tests/fixtures/monefy.csv"),
@@ -134,7 +139,7 @@ pub(crate) async fn seed_usd_rates(state: &AppState, rate: Decimal) {
     .unwrap();
     let dates: BTreeSet<NaiveDate> = expenses.iter().map(|e| e.date).collect();
     for date in dates {
-        store_rate(state, date, rate).await.unwrap();
+        seed_usd_rate(state, date, rate).await;
     }
 }
 

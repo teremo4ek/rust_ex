@@ -12,6 +12,8 @@ use crate::common::models::receipt::ReceiptReport;
 use crate::common::models::{Account, Expense, TransactionKind};
 use crate::common::state::AppState;
 
+use super::usd_conversion::ConversionReport;
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ImportReport {
     pub imported: usize,
@@ -39,7 +41,7 @@ pub async fn upload(
     state: &AppState,
     user_id: Uuid,
     mut multipart: Multipart,
-) -> AppResult<UploadOutcome> {
+) -> AppResult<(UploadOutcome, ConversionReport)> {
     while let Some(field) = multipart.next_field().await? {
         let name = field.name().unwrap_or_default().to_string();
         if name != "file" {
@@ -47,19 +49,28 @@ pub async fn upload(
         }
 
         let data = field.bytes().await?;
-        if data.starts_with(b"%PDF-") {
-            let report = super::receipt_service::import_receipt(state, user_id, &data).await?;
-            return Ok(UploadOutcome::Receipt(report));
-        }
-
-        let content = String::from_utf8(data.to_vec())
-            .map_err(|_| AppError::BadRequest("CSV file must be UTF-8".into()))?;
-
-        let report = import_csv(state, user_id, &content).await?;
-        return Ok(UploadOutcome::Csv(report));
+        return import_bytes(state, user_id, &data).await;
     }
 
     Err(AppError::BadRequest("no 'file' field in upload".into()))
+}
+
+pub async fn import_bytes(
+    state: &AppState,
+    user_id: Uuid,
+    data: &[u8],
+) -> AppResult<(UploadOutcome, ConversionReport)> {
+    let outcome = if data.starts_with(b"%PDF-") {
+        let report = super::receipt_service::import_receipt(state, user_id, data).await?;
+        UploadOutcome::Receipt(report)
+    } else {
+        let content = String::from_utf8(data.to_vec())
+            .map_err(|_| AppError::BadRequest("CSV file must be UTF-8".into()))?;
+        let report = import_csv(state, user_id, &content).await?;
+        UploadOutcome::Csv(report)
+    };
+    let conversion = super::usd_conversion::convert_to_usd(state, user_id).await?;
+    Ok((outcome, conversion))
 }
 
 pub async fn import_csv(

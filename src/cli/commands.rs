@@ -3,7 +3,8 @@ use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
 use crate::common::models::ReceiptStatus;
-use crate::common::services::{analytics_service, expense_service, receipt_service, usd_conversion};
+use crate::common::services::expense_service::{self, UploadOutcome};
+use crate::common::services::{analytics_service, receipt_service};
 use crate::common::state::AppState;
 
 use super::views;
@@ -150,64 +151,65 @@ pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppR
         Command::Upload { path } => {
             let data = std::fs::read(path)
                 .map_err(|e| AppError::BadRequest(format!("cannot read '{path}': {e}")))?;
-            if data.starts_with(b"%PDF-") {
-                let receipt = receipt_service::import_receipt(state, user_id, &data).await?;
-                let conversion = usd_conversion::convert_to_usd(state, user_id).await?;
-                let mut output = match receipt.status {
-                    ReceiptStatus::Attached => format!(
-                        "Receipt {}, {} {}, {} items attached to matching expense",
-                        receipt.date, receipt.total, receipt.currency, receipt.item_count
-                    ),
-                    ReceiptStatus::Pending => format!(
-                        "No matching expense for receipt {}, {} {} — saved as pending, will attach when the CSV row is imported",
-                        receipt.date, receipt.total, receipt.currency
-                    ),
-                    ReceiptStatus::Duplicate => {
-                        let suffix = if receipt.expense_id.is_some() {
-                            " (attached to an expense)"
-                        } else {
-                            " (still pending)"
-                        };
-                        format!(
-                            "Receipt already uploaded: {}, {} {}{}",
-                            receipt.date, receipt.total, receipt.currency, suffix
-                        )
+            let (outcome, conversion) =
+                expense_service::import_bytes(state, user_id, &data).await?;
+            let output = match outcome {
+                UploadOutcome::Receipt(receipt) => {
+                    let mut output = match receipt.status {
+                        ReceiptStatus::Attached => format!(
+                            "Receipt {}, {} {}, {} items attached to matching expense",
+                            receipt.date, receipt.total, receipt.currency, receipt.item_count
+                        ),
+                        ReceiptStatus::Pending => format!(
+                            "No matching expense for receipt {}, {} {} — saved as pending, will attach when the CSV row is imported",
+                            receipt.date, receipt.total, receipt.currency
+                        ),
+                        ReceiptStatus::Duplicate => {
+                            let suffix = if receipt.expense_id.is_some() {
+                                " (attached to an expense)"
+                            } else {
+                                " (still pending)"
+                            };
+                            format!(
+                                "Receipt already uploaded: {}, {} {}{}",
+                                receipt.date, receipt.total, receipt.currency, suffix
+                            )
+                        }
+                    };
+                    if conversion.converted > 0 {
+                        output.push_str(&format!(
+                            "\nConverted {} expenses to USD",
+                            conversion.converted
+                        ));
                     }
-                };
-                if conversion.converted > 0 {
-                    output.push_str(&format!(
-                        "\nConverted {} expenses to USD",
-                        conversion.converted
-                    ));
+                    output
                 }
-                return Ok(Outcome::Output(output));
-            }
-            let content = String::from_utf8(data)
-                .map_err(|_| AppError::BadRequest(format!("'{path}' is not a PDF or UTF-8 CSV")))?;
-            let import_report = expense_service::import_csv(state, user_id, &content).await?;
-            let report = usd_conversion::convert_to_usd(state, user_id).await?;
-            let mut output = format!(
-                "Imported {} expenses from {path}\nConverted {} expenses to USD",
-                import_report.imported, report.converted
-            );
-            if report.skipped > 0 {
-                output.push_str(&format!(
-                    ", {} left unconverted (will retry on next upload)",
-                    report.skipped
-                ));
-            }
-            if import_report.duplicates > 0 {
-                output.push_str(&format!(
-                    "\nSkipped {} duplicates (already imported)",
-                    import_report.duplicates
-                ));
-            }
-            if import_report.receipts_attached > 0 {
-                output.push_str(&format!(
-                    "\nAttached {} pending receipts to matching expenses",
-                    import_report.receipts_attached
-                ));
-            }
+                UploadOutcome::Csv(import_report) => {
+                    let mut output = format!(
+                        "Imported {} expenses from {path}\nConverted {} expenses to USD",
+                        import_report.imported, conversion.converted
+                    );
+                    if conversion.skipped > 0 {
+                        output.push_str(&format!(
+                            ", {} left unconverted (will retry on next upload)",
+                            conversion.skipped
+                        ));
+                    }
+                    if import_report.duplicates > 0 {
+                        output.push_str(&format!(
+                            "\nSkipped {} duplicates (already imported)",
+                            import_report.duplicates
+                        ));
+                    }
+                    if import_report.receipts_attached > 0 {
+                        output.push_str(&format!(
+                            "\nAttached {} pending receipts to matching expenses",
+                            import_report.receipts_attached
+                        ));
+                    }
+                    output
+                }
+            };
             Ok(Outcome::Output(output))
         }
         Command::Stats { view, from, to } => {
@@ -259,6 +261,7 @@ mod tests {
     use super::*;
     use crate::common::config::Config;
     use crate::common::services::auth_service;
+    use crate::common::services::usd_conversion;
     use rust_decimal::dec;
 
     async fn test_state() -> AppState {
@@ -466,6 +469,12 @@ date,account,category,amount,currency,converted amount,currency,description
     #[tokio::test]
     async fn test_execute_upload_receipt_attaches_after_csv() {
         let (state, user_id) = registered_state().await;
+        usd_conversion::seed_usd_rate(
+            &state,
+            NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
+            dec!(2.8230),
+        )
+        .await;
         let csv = "\
 date,account,category,amount,currency,converted amount,currency,description
 11/2/2026,Payment card,Food,-11.51,BYN,-11.51,BYN,Euroopt

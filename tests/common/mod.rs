@@ -30,21 +30,26 @@ pub async fn create_test_app_with_state() -> (Router, AppState) {
 }
 
 #[allow(dead_code)]
+pub async fn seed_rate(state: &AppState, date: NaiveDate, rate: Decimal) {
+    sqlx::query(
+        "INSERT OR REPLACE INTO nbrb_rates (date, currency, base_currency, rate)
+         VALUES (?, 'USD', 'BYN', ?)",
+    )
+    .bind(date)
+    .bind(rate.to_string())
+    .execute(&state.pool)
+    .await
+    .unwrap();
+}
+
+#[allow(dead_code)]
 pub async fn seed_fixture_rates(state: &AppState, rate: Decimal) {
     let expenses =
         expense_service::parse_csv(include_str!("../fixtures/monefy.csv"), uuid::Uuid::new_v4())
             .unwrap();
     let dates: BTreeSet<NaiveDate> = expenses.iter().map(|e| e.date).collect();
     for date in dates {
-        sqlx::query(
-            "INSERT OR REPLACE INTO nbrb_rates (date, currency, base_currency, rate)
-             VALUES (?, 'USD', 'BYN', ?)",
-        )
-        .bind(date)
-        .bind(rate.to_string())
-        .execute(&state.pool)
-        .await
-        .unwrap();
+        seed_rate(state, date, rate).await;
     }
 }
 

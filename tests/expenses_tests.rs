@@ -310,7 +310,13 @@ async fn test_upload_pdf_receipt() {
 
 #[tokio::test]
 async fn test_upload_pdf_then_csv_attaches_receipt() {
-    let app = common::create_test_app().await;
+    let (app, state) = common::create_test_app_with_state().await;
+    common::seed_rate(
+        &state,
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
+        rust_decimal::dec!(2.8230),
+    )
+    .await;
     let (token, _user_id) = common::register_and_login(&app).await;
     let pdf = include_bytes!("fixtures/check.pdf");
 
@@ -323,6 +329,7 @@ date,account,category,amount,currency,converted amount,currency,description
     let body = upload_bytes(&app, &token, "match.csv", "text/csv", csv.as_bytes()).await;
     assert_eq!(body["imported"].as_u64().unwrap(), 1);
     assert_eq!(body["receipts_attached"].as_u64().unwrap(), 1);
+    assert_eq!(body["converted"].as_u64().unwrap(), 1);
 
     let (_, list) = get_json(&app, &token, "/api/expenses").await;
     let expense_id = list["expenses"][0]["id"].as_str().unwrap();
@@ -338,6 +345,7 @@ date,account,category,amount,currency,converted amount,currency,description
     assert_eq!(receipt["fiscal_id"].as_str().unwrap(), "EDDA8397564658AE0718A4AB");
     let items = receipt["items"].as_array().unwrap();
     assert_eq!(items.len(), 4);
+    assert!(items[0].get("receipt_id").is_none());
     assert_eq!(items[0]["name"].as_str().unwrap(), "Яблоко РБ 1кг");
     assert_eq!(items[0]["unit_price"].as_str().unwrap(), "1.16");
     assert_eq!(items[0]["quantity"].as_str().unwrap(), "1.072");
@@ -362,7 +370,13 @@ async fn test_upload_same_pdf_twice_is_duplicate() {
 
 #[tokio::test]
 async fn test_get_expense_receipt_without_receipt_is_404() {
-    let app = common::create_test_app().await;
+    let (app, state) = common::create_test_app_with_state().await;
+    common::seed_rate(
+        &state,
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
+        rust_decimal::dec!(2.8230),
+    )
+    .await;
     let (token, _user_id) = common::register_and_login(&app).await;
     let csv = "\
 date,account,category,amount,currency,converted amount,currency,description

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -285,10 +286,11 @@ async fn insert_receipt(
     receipt_id: Uuid,
     user_id: Uuid,
     parsed: &ParsedReceipt,
-) -> AppResult<()> {
-    sqlx::query(
+) -> AppResult<bool> {
+    let result = sqlx::query(
         "INSERT INTO receipts (id, user_id, date, total, currency, account, fiscal_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (user_id, fiscal_id) DO NOTHING",
     )
     .bind(receipt_id.to_string())
     .bind(user_id.to_string())
@@ -299,7 +301,7 @@ async fn insert_receipt(
     .bind(parsed.fiscal_id.clone())
     .execute(&mut **tx)
     .await?;
-    Ok(())
+    Ok(result.rows_affected() == 1)
 }
 
 async fn insert_receipt_item(
@@ -342,32 +344,20 @@ struct ReceiptRow {
 
 impl ReceiptRow {
     fn into_receipt(self) -> AppResult<Receipt> {
+        let bad =
+            |field: &str| AppError::Database(format!("invalid {field} stored in receipts"));
         Ok(Receipt {
-            id: self
-                .id
-                .parse()
-                .map_err(|_| AppError::Database("invalid receipt id stored in receipts".into()))?,
-            user_id: self
-                .user_id
-                .parse()
-                .map_err(|_| AppError::Database("invalid user id stored in receipts".into()))?,
+            id: self.id.parse().map_err(|_| bad("receipt id"))?,
+            user_id: self.user_id.parse().map_err(|_| bad("user id"))?,
             expense_id: self
                 .expense_id
                 .map(|v| v.parse::<Uuid>())
                 .transpose()
-                .map_err(|_| {
-                    AppError::Database("invalid expense id stored in receipts".into())
-                })?,
+                .map_err(|_| bad("expense id"))?,
             date: self.date,
-            total: self
-                .total
-                .parse()
-                .map_err(|_| AppError::Database("invalid total stored in receipts".into()))?,
+            total: self.total.parse().map_err(|_| bad("total"))?,
             currency: self.currency,
-            account: self
-                .account
-                .parse()
-                .map_err(|_| AppError::Database("invalid account stored in receipts".into()))?,
+            account: self.account.parse().map_err(|_| bad("account"))?,
             fiscal_id: self.fiscal_id,
             items: Vec::new(),
         })
@@ -427,23 +417,47 @@ async fn row_with_items(state: &AppState, row: ReceiptRow) -> AppResult<Receipt>
     Ok(receipt)
 }
 
-async fn find_by_fiscal_id(
-    state: &AppState,
+struct ExistingReceipt {
+    id: Uuid,
+    date: NaiveDate,
+    total: Decimal,
+    currency: String,
+    expense_id: Option<Uuid>,
+    item_count: usize,
+}
+
+async fn existing_receipt(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     user_id: Uuid,
     fiscal_id: &str,
-) -> AppResult<Option<Receipt>> {
-    let row: Option<ReceiptRow> =
-        sqlx::query_as(&format!(
-            "SELECT {RECEIPT_COLUMNS} FROM receipts WHERE user_id = ? AND fiscal_id = ?"
-        ))
-        .bind(user_id.to_string())
-        .bind(fiscal_id)
-        .fetch_optional(&state.pool)
-        .await?;
-    match row {
-        Some(row) => Ok(Some(row_with_items(state, row).await?)),
-        None => Ok(None),
-    }
+) -> AppResult<ExistingReceipt> {
+    let bad = |field: &str| AppError::Database(format!("invalid {field} stored in receipts"));
+    let row: Option<(String, NaiveDate, String, String, Option<String>, i64)> = sqlx::query_as(
+        "SELECT id, date, total, currency, expense_id,
+                (SELECT COUNT(*) FROM receipt_items WHERE receipt_id = receipts.id)
+         FROM receipts WHERE user_id = ? AND fiscal_id = ?",
+    )
+    .bind(user_id.to_string())
+    .bind(fiscal_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    // the conflicting row was visible to the INSERT a moment ago; the same tx still sees it
+    let Some((id, date, total, currency, expense_id, item_count)) = row else {
+        return Err(AppError::Internal(
+            "conflicting receipt vanished inside transaction".into(),
+        ));
+    };
+    Ok(ExistingReceipt {
+        id: id.parse().map_err(|_| bad("receipt id"))?,
+        date,
+        total: total.parse().map_err(|_| bad("total"))?,
+        currency,
+        expense_id: expense_id
+            .map(|v| v.parse::<Uuid>())
+            .transpose()
+            .map_err(|_| bad("expense id"))?,
+        item_count: item_count as usize,
+    })
 }
 
 pub async fn import_receipt(
@@ -454,38 +468,50 @@ pub async fn import_receipt(
     let text = extract_pdf_text(pdf)?;
     let parsed = parse_receipt(&text)?;
 
-    if let Some(existing) = find_by_fiscal_id(state, user_id, &parsed.fiscal_id).await? {
-        return Ok(ReceiptReport {
+    let receipt_id = Uuid::new_v4();
+    let mut tx = state.pool.begin().await?;
+    let report = if insert_receipt(&mut tx, receipt_id, user_id, &parsed).await? {
+        for (position, item) in parsed.items.iter().enumerate() {
+            insert_receipt_item(&mut tx, receipt_id, position as i64, item).await?;
+        }
+        let (status, expense_id) =
+            match try_attach(&mut tx, user_id, receipt_id, parsed.date, parsed.total).await? {
+                AttachOutcome::Attached(expense_id) => (ReceiptStatus::Attached, Some(expense_id)),
+                AttachOutcome::NoMatch => (ReceiptStatus::Pending, None),
+            };
+        ReceiptReport {
+            status,
+            date: parsed.date,
+            total: parsed.total,
+            currency: CURRENCY.to_string(),
+            item_count: parsed.items.len(),
+            expense_id,
+        }
+    } else {
+        let existing = existing_receipt(&mut tx, user_id, &parsed.fiscal_id).await?;
+        let expense_id = match existing.expense_id {
+            Some(expense_id) => Some(expense_id),
+            None => {
+                match try_attach(&mut tx, user_id, existing.id, existing.date, existing.total)
+                    .await?
+                {
+                    AttachOutcome::Attached(expense_id) => Some(expense_id),
+                    AttachOutcome::NoMatch => None,
+                }
+            }
+        };
+        ReceiptReport {
             status: ReceiptStatus::Duplicate,
             date: existing.date,
             total: existing.total,
             currency: existing.currency,
-            item_count: existing.items.len(),
-            expense_id: existing.expense_id,
-        });
-    }
-
-    let receipt_id = Uuid::new_v4();
-    let mut tx = state.pool.begin().await?;
-    insert_receipt(&mut tx, receipt_id, user_id, &parsed).await?;
-    for (position, item) in parsed.items.iter().enumerate() {
-        insert_receipt_item(&mut tx, receipt_id, position as i64, item).await?;
-    }
-    let outcome = try_attach(&mut tx, user_id, receipt_id, parsed.date, parsed.total).await?;
+            item_count: existing.item_count,
+            expense_id,
+        }
+    };
     tx.commit().await?;
 
-    let (status, expense_id) = match outcome {
-        AttachOutcome::Attached(expense_id) => (ReceiptStatus::Attached, Some(expense_id)),
-        AttachOutcome::NoMatch => (ReceiptStatus::Pending, None),
-    };
-    Ok(ReceiptReport {
-        status,
-        date: parsed.date,
-        total: parsed.total,
-        currency: CURRENCY.to_string(),
-        item_count: parsed.items.len(),
-        expense_id,
-    })
+    Ok(report)
 }
 
 pub async fn attach_pending_receipts(
@@ -541,11 +567,30 @@ pub async fn list_pending_receipts(state: &AppState, user_id: Uuid) -> AppResult
     .fetch_all(&state.pool)
     .await?;
 
-    let mut receipts = Vec::with_capacity(rows.len());
-    for row in rows {
-        receipts.push(row_with_items(state, row).await?);
+    let item_rows: Vec<ReceiptItemRow> = sqlx::query_as(
+        "SELECT i.receipt_id, i.position, i.code, i.name, i.unit_price, i.quantity, i.discount, i.total
+         FROM receipt_items i
+         JOIN receipts r ON r.id = i.receipt_id
+         WHERE r.user_id = ? AND r.expense_id IS NULL
+         ORDER BY i.position",
+    )
+    .bind(user_id.to_string())
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut items: HashMap<Uuid, Vec<ReceiptItem>> = HashMap::new();
+    for row in item_rows {
+        let item = row.into_receipt_item()?;
+        items.entry(item.receipt_id).or_default().push(item);
     }
-    Ok(receipts)
+
+    rows.into_iter()
+        .map(|row| {
+            let mut receipt = row.into_receipt()?;
+            receipt.items = items.remove(&receipt.id).unwrap_or_default();
+            Ok(receipt)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -996,6 +1041,53 @@ date,account,category,amount,currency,converted amount,currency,description
         assert_eq!(second.status, ReceiptStatus::Duplicate);
         assert_eq!(second.item_count, 4);
         assert_eq!(count_receipts(&state).await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_reupload_attaches_to_freed_expense() {
+        let (state, user_id) = registered_state().await;
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+11/2/2026,Payment card,Food,-11.51,BYN,-11.51,BYN,Euroopt
+11/2/2026,Payment card,Groceries,-11.51,BYN,-11.51,BYN,Euroopt again
+";
+        expense_service::import_csv(&state, user_id, csv)
+            .await
+            .unwrap();
+        let pdf = include_bytes!("../../../tests/fixtures/check.pdf");
+        let report = import_receipt(&state, user_id, pdf).await.unwrap();
+        assert_eq!(report.status, ReceiptStatus::Attached);
+        let first_expense = report.expense_id.unwrap();
+
+        expense_service::delete_expense(&state, user_id, first_expense)
+            .await
+            .unwrap();
+
+        let report = import_receipt(&state, user_id, pdf).await.unwrap();
+        assert_eq!(report.status, ReceiptStatus::Duplicate);
+        let second_expense = report.expense_id.unwrap();
+        assert_ne!(first_expense, second_expense);
+        assert!(list_pending_receipts(&state, user_id)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_pending_receipts_groups_items_per_receipt() {
+        let (state, user_id) = registered_state().await;
+        let pdf = include_bytes!("../../../tests/fixtures/check.pdf");
+        let pdf2 = include_bytes!("../../../tests/fixtures/check2.pdf");
+        import_receipt(&state, user_id, pdf).await.unwrap();
+        import_receipt(&state, user_id, pdf2).await.unwrap();
+        let pending = list_pending_receipts(&state, user_id).await.unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].items.len(), 4);
+        assert_eq!(pending[1].items.len(), 6);
+        let sum: Decimal = pending[0].items.iter().map(|i| i.total).sum();
+        assert_eq!(sum, dec!(11.51));
+        let sum: Decimal = pending[1].items.iter().map(|i| i.total).sum();
+        assert_eq!(sum, dec!(14.73));
     }
 
     #[tokio::test]

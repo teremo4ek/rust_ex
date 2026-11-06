@@ -106,7 +106,7 @@ Receipts **never create or modify transactions** — the CSV stays the single so
 2. The receipt is matched against the user's expenses by date + amount == total (`kind = expense`, currency `BYN`, no receipt attached yet); the first match in insertion order wins.
 3. Exactly one match → the items are stored as a sub-table under that expense (`GET /api/expenses/{id}/receipt` returns them).
 4. No match → the receipt is stored as **pending** with a clear warning (`GET /api/receipts/pending`, CLI `receipts`); every later CSV import retries matching and reports `receipts_attached`.
-5. Re-uploading a receipt with the same `УИ` is reported as a duplicate — nothing changes.
+5. Re-uploading a receipt with the same `УИ` is reported as a duplicate; if the stored copy is still pending, the re-upload retries matching it against a free expense.
 6. Deleting an expense reverts its receipt to pending (`ON DELETE SET NULL`), so it re-attaches when the CSV row reappears.
 
 PDF upload response example:
