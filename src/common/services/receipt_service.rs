@@ -57,7 +57,7 @@ fn extract_html_text(html: &str) -> AppResult<String> {
     let mut rest = 0usize;
     while let Some(open) = find_pre_open(&lowered[rest..]) {
         let open = rest + open;
-        let Some(tag_end) = lowered[open..].find('>') else {
+        let Some(tag_end) = find_tag_close(&lowered[open..]) else {
             break;
         };
         let content_start = open + tag_end + 1;
@@ -90,17 +90,44 @@ fn find_pre_open(s: &str) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-fn strip_tags(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for c in s.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => out.push(c),
+// the tag's closing '>', ignoring '>' inside quoted attribute values
+fn find_tag_close(s: &str) -> Option<usize> {
+    let mut quote = None;
+    for (i, b) in s.bytes().enumerate() {
+        match quote {
+            Some(q) if b == q => quote = None,
+            Some(_) => {}
+            None if b == b'>' => return Some(i),
+            None if b == b'"' || b == b'\'' => quote = Some(b),
             _ => {}
         }
     }
+    None
+}
+
+// '<' opens a tag only before an ASCII letter, '/' or '!' (HTML tag-open
+// state); anything else is literal text like '3 < 5'
+fn is_tag_start(rest: &[u8]) -> bool {
+    matches!(rest.get(1), Some(b) if b.is_ascii_alphabetic() || *b == b'/' || *b == b'!')
+}
+
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(lt) = rest.find('<') {
+        let (before, from_lt) = rest.split_at(lt);
+        out.push_str(before);
+        if !is_tag_start(from_lt.as_bytes()) {
+            out.push('<');
+            rest = &from_lt[1..];
+            continue;
+        }
+        let Some(tag_end) = find_tag_close(from_lt) else {
+            break;
+        };
+        rest = &from_lt[tag_end + 1..];
+    }
+    out.push_str(rest);
     out
 }
 
@@ -179,25 +206,25 @@ enum State {
     ExpectDiscount(PricedItem),
 }
 
-fn idle_state(line: &str, candidate: Option<String>) -> AppResult<State> {
+fn idle_state(line: &str, candidate: Option<String>) -> State {
     if is_item_code(line) {
-        return Ok(State::ExpectName(line.to_string()));
+        return State::ExpectName(line.to_string());
     }
     if let Some((unit_price, quantity, line_total)) = parse_price_line(line) {
-        return match candidate {
-            Some(name) => Ok(State::ExpectDiscount(PricedItem {
+        // a stray price line (e.g. pdftotext line-wrap) must not reject the
+        // whole receipt; genuinely broken codeless blocks still fail the total check
+        if let Some(name) = candidate {
+            return State::ExpectDiscount(PricedItem {
                 code: String::new(),
                 name,
                 unit_price,
                 quantity,
                 line_total,
-            })),
-            None => Err(AppError::BadRequest(format!(
-                "price line without item name: '{line}'"
-            ))),
-        };
+            });
+        }
+        return State::Idle(None);
     }
-    Ok(State::Idle(Some(line.to_string())))
+    State::Idle(Some(line.to_string()))
 }
 
 pub fn parse_receipt(text: &str) -> AppResult<ParsedReceipt> {
@@ -223,7 +250,7 @@ pub fn parse_receipt(text: &str) -> AppResult<ParsedReceipt> {
             break;
         }
         state = match state {
-            State::Idle(candidate) => idle_state(line, candidate)?,
+            State::Idle(candidate) => idle_state(line, candidate),
             State::ExpectName(code) => State::ExpectPrice {
                 code,
                 name: line.to_string(),
@@ -251,7 +278,7 @@ pub fn parse_receipt(text: &str) -> AppResult<ParsedReceipt> {
                 }
                 None => {
                     items.push(item.finish(Decimal::ZERO));
-                    idle_state(line, None)?
+                    idle_state(line, None)
                 }
             },
         };
@@ -321,9 +348,13 @@ fn parse_discount_line(line: &str) -> Option<Decimal> {
     }
 }
 
-fn parse_dash_date(token: &str) -> Option<NaiveDate> {
+fn parse_date_token(token: &str) -> Option<NaiveDate> {
+    parse_separated_date(token, b'-').or_else(|| parse_separated_date(token, b'.'))
+}
+
+fn parse_separated_date(token: &str, sep: u8) -> Option<NaiveDate> {
     let bytes = token.as_bytes();
-    if bytes.len() != 10 || bytes[2] != b'-' || bytes[5] != b'-' {
+    if bytes.len() != 10 || bytes[2] != sep || bytes[5] != sep {
         return None;
     }
     if !bytes
@@ -333,29 +364,42 @@ fn parse_dash_date(token: &str) -> Option<NaiveDate> {
     {
         return None;
     }
-    NaiveDate::parse_from_str(token, "%d-%m-%Y").ok()
+    let format = if sep == b'-' { "%d-%m-%Y" } else { "%d.%m.%Y" };
+    NaiveDate::parse_from_str(token, format).ok()
 }
 
-fn parse_dot_date(token: &str) -> Option<NaiveDate> {
+// hh:mm or hh:mm:ss
+fn is_time_token(token: &str) -> bool {
     let bytes = token.as_bytes();
-    if bytes.len() != 10 || bytes[2] != b'.' || bytes[5] != b'.' {
-        return None;
+    if bytes.len() != 5 && bytes.len() != 8 {
+        return false;
     }
-    if !bytes
+    if bytes[2] != b':' || (bytes.len() == 8 && bytes[5] != b':') {
+        return false;
+    }
+    bytes
         .iter()
         .enumerate()
         .all(|(i, b)| matches!(i, 2 | 5) || b.is_ascii_digit())
-    {
-        return None;
-    }
-    NaiveDate::parse_from_str(token, "%d.%m.%Y").ok()
 }
 
+// a date followed by a time is the receipt's own timestamp; bare dates
+// (promo footers like 'с 01.09.2026 по 30.09.2026') only win as a fallback
 fn find_receipt_date(text: &str) -> Option<NaiveDate> {
-    text.lines().find_map(|line| {
-        line.split_whitespace()
-            .find_map(|t| parse_dash_date(t).or_else(|| parse_dot_date(t)))
-    })
+    let mut first_plain = None;
+    for line in text.lines() {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        for (i, token) in tokens.iter().enumerate() {
+            let Some(date) = parse_date_token(token) else {
+                continue;
+            };
+            if tokens.get(i + 1).is_some_and(|t| is_time_token(t)) {
+                return Some(date);
+            }
+            first_plain.get_or_insert(date);
+        }
+    }
+    first_plain
 }
 
 fn find_receipt_uid(text: &str) -> Option<String> {
@@ -602,7 +646,16 @@ pub fn looks_like_html(data: &[u8]) -> bool {
     let head = &head[..head.len().min(256)];
     starts_with_ignore_case(head, b"<!doctype")
         || starts_with_ignore_case(head, b"<html")
-        || data.windows(4).any(|w| w.eq_ignore_ascii_case(b"<pre"))
+        || contains_pre_tag(data)
+}
+
+// same delimiter rule as find_pre_open, so a '<premium' in a CSV description
+// cannot pull a Monefy export into the HTML branch
+fn contains_pre_tag(data: &[u8]) -> bool {
+    data.windows(5).any(|w| {
+        w[..4].eq_ignore_ascii_case(b"<pre")
+            && matches!(w[4], b'>' | b' ' | b'\t' | b'\n' | b'\r' | b'/')
+    })
 }
 
 fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
@@ -1190,11 +1243,12 @@ date,account,category,amount,currency,converted amount,currency,description
     }
 
     #[test]
-    fn test_parse_receipt_price_line_without_name_is_error() {
-        let text =
-            "1.00 *1.000 1.00\nИТОГО К ОПЛАТЕ 1.00\n15.09.2026 22:07\nУИ 000000000000000000000011\n";
-        let err = parse_receipt(text).unwrap_err();
-        assert!(err.to_string().contains("price line without item name"));
+    fn test_parse_receipt_ignores_stray_price_line() {
+        let text = "1.00 *1.000 1.00\nХлеб\n1.00 *1.000 1.00\nИТОГО К ОПЛАТЕ 1.00\n15.09.2026 22:07\nУИ 000000000000000000000011\n";
+        let receipt = parse_receipt(text).unwrap();
+        assert_eq!(receipt.items.len(), 1);
+        assert_eq!(receipt.items[0].name, "Хлеб");
+        assert_eq!(receipt.items[0].total, dec!(1));
     }
 
     #[test]
@@ -1264,16 +1318,52 @@ date,account,category,amount,currency,converted amount,currency,description
     }
 
     #[test]
+    fn test_extract_html_text_keeps_bare_angle_brackets() {
+        let html = "<pre>3 > 2 & 4 < 5 товаров</pre>";
+        assert_eq!(extract_html_text(html).unwrap(), "3 > 2 & 4 < 5 товаров");
+    }
+
+    #[test]
+    fn test_extract_html_text_attribute_with_gt() {
+        let html = "<pre class=\"a>b\">line one</pre>";
+        assert_eq!(extract_html_text(html).unwrap(), "line one");
+    }
+
+    #[test]
+    fn test_find_receipt_date_prefers_timestamp_over_promo_dates() {
+        let text =
+            "Акция с 01.09.2026 по 30.09.2026\nКассир: Иванова 15.09.2026 22:07:09\n";
+        assert_eq!(
+            find_receipt_date(text),
+            NaiveDate::from_ymd_opt(2026, 9, 15)
+        );
+    }
+
+    #[test]
+    fn test_find_receipt_date_falls_back_to_bare_date() {
+        assert_eq!(
+            find_receipt_date("Чек от 02-11-2026 без времени"),
+            NaiveDate::from_ymd_opt(2026, 11, 2)
+        );
+        assert_eq!(find_receipt_date("нет даты"), None);
+    }
+
+    #[test]
     fn test_looks_like_html() {
         assert!(looks_like_html(b"<!DOCTYPE html>\n<html lang=\"ru\">"));
         assert!(looks_like_html(b"\xEF\xBB\xBF<!doctype html>"));
         assert!(looks_like_html(b"<html>"));
         assert!(looks_like_html(b"junk with <PRE class=\"x\"> inside"));
+        assert!(looks_like_html(b"junk <pre\nmore junk"));
         assert!(!looks_like_html(b"%PDF-1.7 definitely not html"));
         assert!(!looks_like_html(include_bytes!(
             "../../../tests/fixtures/monefy.csv"
         )));
         assert!(!looks_like_html(b"date,account,category,amount"));
+        assert!(!looks_like_html(
+            b"date,account,category,amount,currency,converted amount,currency,description\n\
+              4/22/2026,Cash,Food,-17.26,BYN,-17.26,BYN,<premium coffee>"
+        ));
         assert!(!looks_like_html(b""));
     }
 

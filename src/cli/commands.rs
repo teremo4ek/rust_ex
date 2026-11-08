@@ -149,7 +149,10 @@ fn parse_stats(rest: &str) -> AppResult<Command> {
 pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppResult<Outcome> {
     match command {
         Command::Upload { path } => {
-            let (outcome, conversion) = if path.contains("://") {
+            // documented routing: only http(s) prefixes are urls, anything else
+            // (file:// included) is a local path
+            let is_url = path.starts_with("http://") || path.starts_with("https://");
+            let (outcome, conversion) = if is_url {
                 expense_service::import_url(state, user_id, path).await?
             } else {
                 let data = std::fs::read(path)
@@ -570,6 +573,14 @@ date,account,category,amount,currency,converted amount,currency,description
     async fn test_execute_upload_missing_file() {
         let (state, user_id) = registered_state().await;
         let cmd = parse_command("upload /nonexistent/x.csv").unwrap();
+        let err = execute(&state, user_id, &cmd).await.unwrap_err();
+        assert!(err.to_string().contains("cannot read"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_upload_non_http_prefix_is_read_as_path() {
+        let (state, user_id) = registered_state().await;
+        let cmd = parse_command("upload file:///nonexistent/x.html").unwrap();
         let err = execute(&state, user_id, &cmd).await.unwrap_err();
         assert!(err.to_string().contains("cannot read"));
     }
