@@ -35,6 +35,17 @@ curl -X POST http://localhost:3000/api/expenses/upload \
   -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4" \
   -F "file=@tests/fixtures/check.pdf"
 
+### Upload Sosedi receipt HTML
+curl -X POST http://localhost:3000/api/expenses/upload \
+  -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4" \
+  -F "file=@tests/fixtures/check3.html"
+
+### Import receipt from URL
+curl -X POST http://localhost:3000/api/receipts/url \
+  -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://sosedi.by/receipt/EC48CAF708764A540719225F"}'
+
 ### Get pending receipts
 curl http://localhost:3000/api/receipts/pending \
   -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEiLCJleHAiOjE3OTE2MzExMjR9.XpBMc4vGwX5BsoCGg0E_L2hZCYeJUaNqO2eZ2w3MlP4"

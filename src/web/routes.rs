@@ -16,6 +16,7 @@ pub fn create_router(state: AppState) -> Router {
             get(handlers::expenses::expense_receipt),
         )
         .route("/api/receipts/pending", get(handlers::receipts::pending))
+        .route("/api/receipts/url", post(handlers::receipts::import_url))
         .route("/api/analytics/summary", get(handlers::analytics::summary))
         .route("/api/analytics/by-category", get(handlers::analytics::by_category))
         .route("/api/analytics/by-account", get(handlers::analytics::by_account))

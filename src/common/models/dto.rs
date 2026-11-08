@@ -63,6 +63,11 @@ pub struct PendingReceiptsResponse {
     pub receipts: Vec<Receipt>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ReceiptUrlRequest {
+    pub url: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ExpensesResponse {
     pub expenses: Vec<Expense>,

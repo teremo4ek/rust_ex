@@ -13,7 +13,7 @@ use crate::common::models::receipt::{
 use crate::common::models::Account;
 use crate::common::state::AppState;
 
-const MULTIPLIERS: [&str; 4] = ["х", "Х", "x", "X"];
+const MULTIPLIERS: [&str; 5] = ["х", "Х", "x", "X", "*"];
 const CURRENCY: &str = "BYN";
 
 fn extract_pdf_text(pdf: &[u8]) -> AppResult<String> {
@@ -49,6 +49,108 @@ fn extract_pdf_text(pdf: &[u8]) -> AppResult<String> {
         .map_err(|_| AppError::BadRequest("pdftotext output is not UTF-8".into()))
 }
 
+fn extract_html_text(html: &str) -> AppResult<String> {
+    // ASCII lowercase keeps byte offsets identical to the original, so the
+    // slices below always land on UTF-8 char boundaries
+    let lowered = html.to_ascii_lowercase();
+    let mut lines: Vec<String> = Vec::new();
+    let mut rest = 0usize;
+    while let Some(open) = find_pre_open(&lowered[rest..]) {
+        let open = rest + open;
+        let Some(tag_end) = lowered[open..].find('>') else {
+            break;
+        };
+        let content_start = open + tag_end + 1;
+        let Some(close) = lowered[content_start..].find("</pre") else {
+            break;
+        };
+        let content = decode_entities(&strip_tags(&html[content_start..content_start + close]));
+        for line in content.lines() {
+            let line = line.trim();
+            if !line.is_empty() {
+                lines.push(line.to_string());
+            }
+        }
+        rest = content_start + close;
+    }
+    if lines.is_empty() {
+        return Err(AppError::BadRequest("no <pre> blocks in HTML receipt".into()));
+    }
+    Ok(lines.join("\n"))
+}
+
+fn find_pre_open(s: &str) -> Option<usize> {
+    s.as_bytes()
+        .windows(5)
+        .enumerate()
+        .find(|(_, w)| {
+            w[..4].eq_ignore_ascii_case(b"<pre")
+                && matches!(w[4], b'>' | b' ' | b'\t' | b'\n' | b'\r' | b'/')
+        })
+        .map(|(i, _)| i)
+}
+
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn decode_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(pos) = rest.find('&') {
+        out.push_str(&rest[..pos]);
+        let tail = &rest[pos..];
+        match decode_entity(tail) {
+            Some((text, consumed)) => {
+                out.push_str(&text);
+                rest = &tail[consumed..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn decode_entity(tail: &str) -> Option<(String, usize)> {
+    let end = tail.find(';')?;
+    if end == 0 || end > 11 {
+        return None;
+    }
+    let body = &tail[1..end];
+    let decoded = match body {
+        "amp" => "&".to_string(),
+        "lt" => "<".to_string(),
+        "gt" => ">".to_string(),
+        "quot" => "\"".to_string(),
+        "apos" => "'".to_string(),
+        "nbsp" => " ".to_string(),
+        _ => {
+            let code = body
+                .strip_prefix("#x")
+                .or_else(|| body.strip_prefix("#X"))
+                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                .or_else(|| body.strip_prefix('#').and_then(|dec| dec.parse::<u32>().ok()))
+                .and_then(char::from_u32)?;
+            code.to_string()
+        }
+    };
+    Some((decoded, end + 1))
+}
+
 struct PricedItem {
     code: String,
     name: String,
@@ -70,18 +172,39 @@ impl PricedItem {
     }
 }
 
-pub fn parse_receipt(text: &str) -> AppResult<ParsedReceipt> {
-    enum State {
-        Idle,
-        ExpectName(String),
-        ExpectPrice { code: String, name: String },
-        ExpectDiscount(PricedItem),
-    }
+enum State {
+    Idle(Option<String>),
+    ExpectName(String),
+    ExpectPrice { code: String, name: String },
+    ExpectDiscount(PricedItem),
+}
 
+fn idle_state(line: &str, candidate: Option<String>) -> AppResult<State> {
+    if is_item_code(line) {
+        return Ok(State::ExpectName(line.to_string()));
+    }
+    if let Some((unit_price, quantity, line_total)) = parse_price_line(line) {
+        return match candidate {
+            Some(name) => Ok(State::ExpectDiscount(PricedItem {
+                code: String::new(),
+                name,
+                unit_price,
+                quantity,
+                line_total,
+            })),
+            None => Err(AppError::BadRequest(format!(
+                "price line without item name: '{line}'"
+            ))),
+        };
+    }
+    Ok(State::Idle(Some(line.to_string())))
+}
+
+pub fn parse_receipt(text: &str) -> AppResult<ParsedReceipt> {
     let mut items: Vec<ParsedItem> = Vec::new();
     let mut total = None;
 
-    let mut state = State::Idle;
+    let mut state = State::Idle(None);
     for raw in text.lines() {
         let line = raw.trim();
         if line.is_empty() {
@@ -100,13 +223,7 @@ pub fn parse_receipt(text: &str) -> AppResult<ParsedReceipt> {
             break;
         }
         state = match state {
-            State::Idle => {
-                if is_item_code(line) {
-                    State::ExpectName(line.to_string())
-                } else {
-                    State::Idle
-                }
-            }
+            State::Idle(candidate) => idle_state(line, candidate)?,
             State::ExpectName(code) => State::ExpectPrice {
                 code,
                 name: line.to_string(),
@@ -130,15 +247,11 @@ pub fn parse_receipt(text: &str) -> AppResult<ParsedReceipt> {
             State::ExpectDiscount(item) => match parse_discount_line(line) {
                 Some(discount) => {
                     items.push(item.finish(discount));
-                    State::Idle
+                    State::Idle(None)
                 }
                 None => {
                     items.push(item.finish(Decimal::ZERO));
-                    if is_item_code(line) {
-                        State::ExpectName(line.to_string())
-                    } else {
-                        State::Idle
-                    }
+                    idle_state(line, None)?
                 }
             },
         };
@@ -155,7 +268,7 @@ pub fn parse_receipt(text: &str) -> AppResult<ParsedReceipt> {
         find_receipt_date(text).ok_or_else(|| AppError::BadRequest("receipt has no date".into()))?;
     let fiscal_id = find_receipt_uid(text)
         .ok_or_else(|| AppError::BadRequest("receipt has no unique id".into()))?;
-    let account = if text.contains("КАРТОЙ") {
+    let account = if text.to_lowercase().contains("картой") {
         Account::PaymentCard
     } else {
         Account::Cash
@@ -223,9 +336,26 @@ fn parse_dash_date(token: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(token, "%d-%m-%Y").ok()
 }
 
+fn parse_dot_date(token: &str) -> Option<NaiveDate> {
+    let bytes = token.as_bytes();
+    if bytes.len() != 10 || bytes[2] != b'.' || bytes[5] != b'.' {
+        return None;
+    }
+    if !bytes
+        .iter()
+        .enumerate()
+        .all(|(i, b)| matches!(i, 2 | 5) || b.is_ascii_digit())
+    {
+        return None;
+    }
+    NaiveDate::parse_from_str(token, "%d.%m.%Y").ok()
+}
+
 fn find_receipt_date(text: &str) -> Option<NaiveDate> {
-    text.lines()
-        .find_map(|line| line.split_whitespace().find_map(parse_dash_date))
+    text.lines().find_map(|line| {
+        line.split_whitespace()
+            .find_map(|t| parse_dash_date(t).or_else(|| parse_dot_date(t)))
+    })
 }
 
 fn find_receipt_uid(text: &str) -> Option<String> {
@@ -233,6 +363,7 @@ fn find_receipt_uid(text: &str) -> Option<String> {
         let trimmed = line.trim();
         trimmed
             .strip_prefix("УИ:")
+            .or_else(|| trimmed.strip_prefix("УИ "))
             .map(|rest| rest.trim().to_string())
             .filter(|id| !id.is_empty())
     })
@@ -460,13 +591,48 @@ async fn existing_receipt(
     })
 }
 
+pub fn looks_like_html(data: &[u8]) -> bool {
+    // the Monefy CSV fixture carries a UTF-8 BOM, HTML pages usually do not
+    let data = data.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(data);
+    let start = data
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .unwrap_or(data.len());
+    let head = &data[start..];
+    let head = &head[..head.len().min(256)];
+    starts_with_ignore_case(head, b"<!doctype")
+        || starts_with_ignore_case(head, b"<html")
+        || data.windows(4).any(|w| w.eq_ignore_ascii_case(b"<pre"))
+}
+
+fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.len() >= needle.len() && haystack[..needle.len()].eq_ignore_ascii_case(needle)
+}
+
 pub async fn import_receipt(
     state: &AppState,
     user_id: Uuid,
     pdf: &[u8],
 ) -> AppResult<ReceiptReport> {
     let text = extract_pdf_text(pdf)?;
-    let parsed = parse_receipt(&text)?;
+    import_receipt_text(state, user_id, &text).await
+}
+
+pub async fn import_html(
+    state: &AppState,
+    user_id: Uuid,
+    html: &str,
+) -> AppResult<ReceiptReport> {
+    let text = extract_html_text(html)?;
+    import_receipt_text(state, user_id, &text).await
+}
+
+async fn import_receipt_text(
+    state: &AppState,
+    user_id: Uuid,
+    text: &str,
+) -> AppResult<ReceiptReport> {
+    let parsed = parse_receipt(text)?;
 
     let receipt_id = Uuid::new_v4();
     let mut tx = state.pool.begin().await?;
@@ -752,6 +918,42 @@ mod tests {
                устройстве.
                ------------------------------------------"#;
 
+    const SOSEDI_RECEIPT_TEXT: &str = r#"    Общество с ограниченной ответственностью
+                   "Либретик"
+                Магазин "Соседи"
+         г. Минск УЛ. ПРИМЕРНАЯ, 1
+УНП 100000000                  РН СККО 100000003
+               Платежный документ
+                 N док. 00003
+────────────────────────────────────────────────
+                               Цена Кол-во Итого
+ХЛЕБЦЫ ПОЛОЦКИЕ РЖАН.ЭКСТРУЗИОННЫЕ.80Г
+                               1.39 *1.000  1.39
+МОЛОКО ДЕТ.ДЕПИ 3.2% 250МЛ
+                               0.82 *1.000  0.82
+МОЛОКО ДЕТ.ДЕПИ 3.2% 250МЛ
+                               0.82 *1.000  0.82
+[M] МОЛОКО ПИТ.УЛЬТРАПАСТ.ЯСЬ БЕЛОУС 3.2% 1Л
+                               2.98 *1.000  2.98
+[M] МОЛОКО УЛЬТРАПАСТ.ЯСЬ БЕЛОУС 2.5% 1Л
+                               2.76 *1.000  2.76
+БУМАГА ТУАЛ.СИПТО ВАЙЛЕТ 3-Х СЛ.1*8РУЛ
+                               4.99 *1.000  4.99
+────────────────────────────────────────────────
+ИТОГО К ОПЛАТЕ                             13.76
+────────────────────────────────────────────────
+Банк. пл. картой:                          13.76
+────────────────────────────────────────────────
+Кассир: Иванова Анна Петровна 15.09.2026 22:07:09
+          УИ 000000000000000000000010
+ТЕРМИНАЛ: TEST0001
+Сумма                              13,76 BYN"#;
+
+    const SOSEDI_MATCH_CSV: &str = "\
+date,account,category,amount,currency,converted amount,currency,description
+09/15/2026,Payment card,Food,-13.76,BYN,-13.76,BYN,Sosedi
+";
+
     const MATCH_CSV: &str = "\
 date,account,category,amount,currency,converted amount,currency,description
 11/2/2026,Payment card,Food,-11.51,BYN,-11.51,BYN,Euroopt
@@ -913,7 +1115,7 @@ date,account,category,amount,currency,converted amount,currency,description
     fn test_parse_receipt_missing_date_is_error() {
         let text = RECEIPT_TEXT
             .lines()
-            .filter(|l| !l.contains("02-11-2026"))
+            .filter(|l| !l.contains("02-11-2026") && !l.contains("02.11.2026"))
             .collect::<Vec<_>>()
             .join("\n");
         let err = parse_receipt(&text).unwrap_err();
@@ -946,6 +1148,67 @@ date,account,category,amount,currency,converted amount,currency,description
     }
 
     #[test]
+    fn test_parse_sosedi_receipt() {
+        let receipt = parse_receipt(SOSEDI_RECEIPT_TEXT).unwrap();
+        assert_eq!(receipt.items.len(), 6);
+        assert!(receipt.items.iter().all(|i| i.code.is_empty()));
+        assert_eq!(
+            receipt.items[0].name,
+            "ХЛЕБЦЫ ПОЛОЦКИЕ РЖАН.ЭКСТРУЗИОННЫЕ.80Г"
+        );
+        assert_eq!(receipt.items[0].unit_price, dec!(1.39));
+        assert_eq!(receipt.items[0].quantity, dec!(1.000));
+        let totals: Vec<Decimal> = receipt.items.iter().map(|i| i.total).collect();
+        assert_eq!(
+            totals,
+            vec![
+                dec!(1.39),
+                dec!(0.82),
+                dec!(0.82),
+                dec!(2.98),
+                dec!(2.76),
+                dec!(4.99)
+            ]
+        );
+        assert!(receipt.items.iter().all(|i| i.discount == Decimal::ZERO));
+        assert_eq!(receipt.total, dec!(13.76));
+        assert_eq!(receipt.date, NaiveDate::from_ymd_opt(2026, 9, 15).unwrap());
+        assert_eq!(receipt.account, Account::PaymentCard);
+        assert_eq!(receipt.fiscal_id, "000000000000000000000010");
+    }
+
+    #[test]
+    fn test_parse_price_line_accepts_star() {
+        assert_eq!(
+            parse_price_line("1.39 *1.000  1.39"),
+            Some((dec!(1.39), dec!(1.000), dec!(1.39)))
+        );
+        assert_eq!(
+            parse_price_line("1.39 * 1.000 1.39"),
+            Some((dec!(1.39), dec!(1.000), dec!(1.39)))
+        );
+    }
+
+    #[test]
+    fn test_parse_receipt_price_line_without_name_is_error() {
+        let text =
+            "1.00 *1.000 1.00\nИТОГО К ОПЛАТЕ 1.00\n15.09.2026 22:07\nУИ 000000000000000000000011\n";
+        let err = parse_receipt(text).unwrap_err();
+        assert!(err.to_string().contains("price line without item name"));
+    }
+
+    #[test]
+    fn test_parse_receipt_codeless_discount_applied() {
+        let text = "Хлеб\n1.00 *1.000 1.00\nСкидка -0.06\nИТОГО К ОПЛАТЕ 0.94\n15.09.2026 22:07\nУИ 000000000000000000000012\n";
+        let receipt = parse_receipt(text).unwrap();
+        assert_eq!(receipt.items.len(), 1);
+        assert_eq!(receipt.items[0].name, "Хлеб");
+        assert_eq!(receipt.items[0].code, "");
+        assert_eq!(receipt.items[0].discount, dec!(-0.06));
+        assert_eq!(receipt.items[0].total, dec!(0.94));
+    }
+
+    #[test]
     fn test_extract_pdf_text_fixture_parses_receipt() {
         let pdf = include_bytes!("../../../tests/fixtures/check.pdf");
         let text = extract_pdf_text(pdf).unwrap();
@@ -965,6 +1228,53 @@ date,account,category,amount,currency,converted amount,currency,description
         let sum: Decimal = receipt.items.iter().map(|i| i.total).sum();
         assert_eq!(sum, dec!(14.73));
         assert_eq!(receipt.fiscal_id, "BD79D40E63885B830718A4B2");
+    }
+
+    #[test]
+    fn test_extract_html_text_fixture_parses_receipt() {
+        let html = include_bytes!("../../../tests/fixtures/check3.html");
+        let text = extract_html_text(std::str::from_utf8(html).unwrap()).unwrap();
+        let receipt = parse_receipt(&text).unwrap();
+        assert_eq!(receipt.items.len(), 6);
+        let sum: Decimal = receipt.items.iter().map(|i| i.total).sum();
+        assert_eq!(sum, dec!(13.76));
+        assert_eq!(receipt.fiscal_id, "EC48CAF708764A540719225F");
+        assert_eq!(receipt.date, NaiveDate::from_ymd_opt(2026, 9, 15).unwrap());
+        assert_eq!(receipt.account, Account::PaymentCard);
+    }
+
+    #[test]
+    fn test_extract_html_text_without_pre_is_error() {
+        let err = extract_html_text("<html><body><p>hello</p></body></html>").unwrap_err();
+        assert!(err.to_string().contains("no <pre> blocks"));
+    }
+
+    #[test]
+    fn test_extract_html_text_strips_tags_and_decodes_entities() {
+        let html = "<div><PRE>Товар &amp; <b>упаковка</b> &#65;&#x42;</PRE><pre>  </pre></div>";
+        let text = extract_html_text(html).unwrap();
+        assert_eq!(text, "Товар & упаковка AB");
+    }
+
+    #[test]
+    fn test_extract_html_text_keeps_line_per_pre_block() {
+        let html = "<pre>line one</pre><img src=\"x\"><pre>line two</pre>";
+        let text = extract_html_text(html).unwrap();
+        assert_eq!(text, "line one\nline two");
+    }
+
+    #[test]
+    fn test_looks_like_html() {
+        assert!(looks_like_html(b"<!DOCTYPE html>\n<html lang=\"ru\">"));
+        assert!(looks_like_html(b"\xEF\xBB\xBF<!doctype html>"));
+        assert!(looks_like_html(b"<html>"));
+        assert!(looks_like_html(b"junk with <PRE class=\"x\"> inside"));
+        assert!(!looks_like_html(b"%PDF-1.7 definitely not html"));
+        assert!(!looks_like_html(include_bytes!(
+            "../../../tests/fixtures/monefy.csv"
+        )));
+        assert!(!looks_like_html(b"date,account,category,amount"));
+        assert!(!looks_like_html(b""));
     }
 
     #[tokio::test]
@@ -1029,6 +1339,57 @@ date,account,category,amount,currency,converted amount,currency,description
     fn test_parse_receipt_amount_scale_variant_matches() {
         let receipt = parse_receipt(RECEIPT_TEXT).unwrap();
         assert_eq!(receipt.total, dec!(11.510));
+    }
+
+    fn sosedi_html() -> &'static str {
+        std::str::from_utf8(include_bytes!("../../../tests/fixtures/check3.html")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_import_html_without_expense_is_pending() {
+        let (state, user_id) = registered_state().await;
+        let report = import_html(&state, user_id, sosedi_html()).await.unwrap();
+        assert_eq!(report.status, ReceiptStatus::Pending);
+        assert_eq!(report.date, NaiveDate::from_ymd_opt(2026, 9, 15).unwrap());
+        assert_eq!(report.total, dec!(13.76));
+        assert_eq!(report.currency, "BYN");
+        assert_eq!(report.item_count, 6);
+        assert_eq!(report.expense_id, None);
+        let pending = list_pending_receipts(&state, user_id).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].items.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn test_import_html_attaches_to_matching_expense() {
+        let (state, user_id) = registered_state().await;
+        expense_service::import_csv(&state, user_id, SOSEDI_MATCH_CSV)
+            .await
+            .unwrap();
+        let report = import_html(&state, user_id, sosedi_html()).await.unwrap();
+        assert_eq!(report.status, ReceiptStatus::Attached);
+        let expense_id = report.expense_id.unwrap();
+        let receipt = get_expense_receipt(&state, user_id, expense_id)
+            .await
+            .unwrap();
+        assert_eq!(receipt.items.len(), 6);
+        assert!(receipt.items.iter().all(|i| i.code.is_empty()));
+        assert_eq!(receipt.items[0].unit_price, dec!(1.39));
+        assert!(list_pending_receipts(&state, user_id)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_import_html_duplicate_fiscal_id() {
+        let (state, user_id) = registered_state().await;
+        let first = import_html(&state, user_id, sosedi_html()).await.unwrap();
+        let second = import_html(&state, user_id, sosedi_html()).await.unwrap();
+        assert_eq!(first.status, ReceiptStatus::Pending);
+        assert_eq!(second.status, ReceiptStatus::Duplicate);
+        assert_eq!(second.item_count, 6);
+        assert_eq!(count_receipts(&state).await, 1);
     }
 
     #[tokio::test]

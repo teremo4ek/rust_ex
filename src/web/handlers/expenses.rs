@@ -10,16 +10,15 @@ use crate::common::models::dto::{
 };
 use crate::common::models::Receipt;
 use crate::common::services::expense_service::UploadOutcome;
+use crate::common::services::usd_conversion::ConversionReport;
 use crate::common::services::{expense_service, receipt_service};
 use crate::common::state::AppState;
 use crate::web::middleware::auth::AuthUser;
 
-pub async fn upload(
-    State(state): State<AppState>,
-    auth: AuthUser,
-    multipart: Multipart,
-) -> AppResult<Response> {
-    let (outcome, report) = expense_service::upload(&state, auth.id, multipart).await?;
+pub(crate) fn outcome_response(
+    outcome: UploadOutcome,
+    report: ConversionReport,
+) -> Response {
     let body = match outcome {
         UploadOutcome::Csv(import_report) => Json(UploadResponse {
             imported: import_report.imported,
@@ -41,7 +40,16 @@ pub async fn upload(
         })
         .into_response(),
     };
-    Ok((StatusCode::CREATED, body).into_response())
+    (StatusCode::CREATED, body).into_response()
+}
+
+pub async fn upload(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    multipart: Multipart,
+) -> AppResult<Response> {
+    let (outcome, report) = expense_service::upload(&state, auth.id, multipart).await?;
+    Ok(outcome_response(outcome, report))
 }
 
 pub async fn list(

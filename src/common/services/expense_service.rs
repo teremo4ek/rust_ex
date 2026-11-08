@@ -63,6 +63,11 @@ pub async fn import_bytes(
     let outcome = if data.starts_with(b"%PDF-") {
         let report = super::receipt_service::import_receipt(state, user_id, data).await?;
         UploadOutcome::Receipt(report)
+    } else if super::receipt_service::looks_like_html(data) {
+        let html = std::str::from_utf8(data)
+            .map_err(|_| AppError::BadRequest("HTML receipt must be UTF-8".into()))?;
+        let report = super::receipt_service::import_html(state, user_id, html).await?;
+        UploadOutcome::Receipt(report)
     } else {
         let content = String::from_utf8(data.to_vec())
             .map_err(|_| AppError::BadRequest("CSV file must be UTF-8".into()))?;
@@ -71,6 +76,15 @@ pub async fn import_bytes(
     };
     let conversion = super::usd_conversion::convert_to_usd(state, user_id).await?;
     Ok((outcome, conversion))
+}
+
+pub async fn import_url(
+    state: &AppState,
+    user_id: Uuid,
+    url: &str,
+) -> AppResult<(UploadOutcome, ConversionReport)> {
+    let data = crate::common::helpers::http::fetch_bytes(url).await?;
+    import_bytes(state, user_id, &data).await
 }
 
 pub async fn import_csv(
@@ -402,6 +416,7 @@ pub async fn get_user_expenses(
 mod tests {
     use super::*;
     use crate::common::config::Config;
+    use crate::common::models::ReceiptStatus;
     use crate::common::services::auth_service;
     use rust_decimal::dec;
 
@@ -778,5 +793,61 @@ date,account,category,amount,currency,converted amount,currency,description
                 receipts_attached: 0
             }
         );
+    }
+
+    const SOSEDI_CSV: &str = "\
+date,account,category,amount,currency,converted amount,currency,description
+09/15/2026,Payment card,Food,-13.76,BYN,-13.76,BYN,Sosedi
+";
+
+    #[tokio::test]
+    async fn test_import_bytes_html_receipt_pending() {
+        let (state, user_id) = registered_state().await;
+        let html = include_bytes!("../../../tests/fixtures/check3.html");
+        let (outcome, conversion) = import_bytes(&state, user_id, html).await.unwrap();
+        let UploadOutcome::Receipt(report) = outcome else {
+            panic!("expected receipt outcome");
+        };
+        assert_eq!(report.status, ReceiptStatus::Pending);
+        assert_eq!(report.item_count, 6);
+        assert_eq!(report.total, dec!(13.76));
+        assert_eq!(conversion.converted, 0);
+    }
+
+    #[tokio::test]
+    async fn test_import_bytes_html_attaches_to_csv() {
+        let (state, user_id) = registered_state().await;
+        crate::common::services::usd_conversion::seed_usd_rate(
+            &state,
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 15).unwrap(),
+            dec!(2.8230),
+        )
+        .await;
+        let (outcome, csv_conversion) = import_bytes(&state, user_id, SOSEDI_CSV.as_bytes())
+            .await
+            .unwrap();
+        assert!(matches!(outcome, UploadOutcome::Csv(_)));
+        assert_eq!(csv_conversion.converted, 1);
+
+        let html = include_bytes!("../../../tests/fixtures/check3.html");
+        let (outcome, conversion) = import_bytes(&state, user_id, html).await.unwrap();
+        let UploadOutcome::Receipt(report) = outcome else {
+            panic!("expected receipt outcome");
+        };
+        assert_eq!(report.status, ReceiptStatus::Attached);
+        assert!(report.expense_id.is_some());
+        assert_eq!(conversion.converted, 0);
+    }
+
+    #[tokio::test]
+    async fn test_import_bytes_html_duplicate() {
+        let (state, user_id) = registered_state().await;
+        let html = include_bytes!("../../../tests/fixtures/check3.html");
+        import_bytes(&state, user_id, html).await.unwrap();
+        let (outcome, _) = import_bytes(&state, user_id, html).await.unwrap();
+        let UploadOutcome::Receipt(report) = outcome else {
+            panic!("expected receipt outcome");
+        };
+        assert_eq!(report.status, ReceiptStatus::Duplicate);
     }
 }
