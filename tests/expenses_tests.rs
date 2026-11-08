@@ -466,3 +466,98 @@ async fn test_upload_rejects_non_finite_amount() {
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn test_upload_html_receipt() {
+    let app = common::create_test_app().await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+    let html = include_bytes!("fixtures/check3.html");
+
+    let body = upload_bytes(&app, &token, "check3.html", "text/html", html).await;
+
+    assert_eq!(body["status"].as_str().unwrap(), "pending");
+    assert_eq!(body["date"].as_str().unwrap(), "2026-09-15");
+    assert_eq!(body["total"].as_str().unwrap(), "13.76");
+    assert_eq!(body["currency"].as_str().unwrap(), "BYN");
+    assert_eq!(body["item_count"].as_u64().unwrap(), 6);
+    assert!(body["expense_id"].is_null());
+    assert_eq!(body["converted"].as_u64().unwrap(), 0);
+
+    let (status, pending) = get_json(&app, &token, "/api/receipts/pending").await;
+    assert_eq!(status, StatusCode::OK);
+    let receipts = pending["receipts"].as_array().unwrap();
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(
+        receipts[0]["fiscal_id"].as_str().unwrap(),
+        "EC48CAF708764A540719225F"
+    );
+    let items = receipts[0]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 6);
+    assert_eq!(items[0]["code"].as_str().unwrap(), "");
+    assert_eq!(items[0]["quantity"].as_str().unwrap(), "1.000");
+}
+
+async fn post_receipt_url(
+    app: &axum::Router,
+    token: &str,
+    url: &str,
+) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/receipts/url")
+                .header("authorization", common::auth_header(token))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({ "url": url }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let body = serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    (status, body)
+}
+
+#[tokio::test]
+async fn test_receipt_url_rejects_empty_and_non_http_schemes() {
+    let app = common::create_test_app().await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+
+    let (status, body) = post_receipt_url(&app, &token, "").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("must not be empty"));
+
+    let (status, _) = post_receipt_url(&app, &token, "ftp://example.com/x.html").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = post_receipt_url(&app, &token, "file:///etc/passwd").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_receipt_url_requires_auth() {
+    let app = common::create_test_app().await;
+
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/receipts/url")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "url": "https://example.com/r.html" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}

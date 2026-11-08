@@ -58,7 +58,7 @@ pub fn parse_command(line: &str) -> AppResult<Command> {
     match verb {
         "upload" => {
             if rest.is_empty() {
-                return Err(AppError::BadRequest("usage: upload <path>".into()));
+                return Err(AppError::BadRequest("usage: upload <path|url>".into()));
             }
             Ok(Command::Upload {
                 path: rest.to_string(),
@@ -149,10 +149,16 @@ fn parse_stats(rest: &str) -> AppResult<Command> {
 pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppResult<Outcome> {
     match command {
         Command::Upload { path } => {
-            let data = std::fs::read(path)
-                .map_err(|e| AppError::BadRequest(format!("cannot read '{path}': {e}")))?;
-            let (outcome, conversion) =
-                expense_service::import_bytes(state, user_id, &data).await?;
+            // documented routing: only http(s) prefixes are urls, anything else
+            // (file:// included) is a local path
+            let is_url = path.starts_with("http://") || path.starts_with("https://");
+            let (outcome, conversion) = if is_url {
+                expense_service::import_url(state, user_id, path).await?
+            } else {
+                let data = std::fs::read(path)
+                    .map_err(|e| AppError::BadRequest(format!("cannot read '{path}': {e}")))?;
+                expense_service::import_bytes(state, user_id, &data).await?
+            };
             let output = match outcome {
                 UploadOutcome::Receipt(receipt) => {
                     let mut output = match receipt.status {
@@ -516,6 +522,29 @@ date,account,category,amount,currency,converted amount,currency,description
         ));
     }
 
+    #[test]
+    fn test_parse_upload_accepts_url() {
+        let cmd = parse_command("upload https://example.com/receipt.html").unwrap();
+        let Command::Upload { path } = cmd else {
+            panic!("expected upload command");
+        };
+        assert_eq!(path, "https://example.com/receipt.html");
+    }
+
+    #[tokio::test]
+    async fn test_execute_upload_html_fixture() {
+        let (state, user_id) = registered_state().await;
+        let cmd = parse_command("upload tests/fixtures/check3.html").unwrap();
+        match execute(&state, user_id, &cmd).await.unwrap() {
+            Outcome::Output(text) => {
+                assert!(text.contains(
+                    "No matching expense for receipt 2026-09-15, 13.76 BYN — saved as pending, will attach when the CSV row is imported"
+                ));
+            }
+            Outcome::Exit => panic!("expected output"),
+        }
+    }
+
     #[tokio::test]
     async fn test_execute_receipts_command_empty() {
         let (state, user_id) = registered_state().await;
@@ -544,6 +573,14 @@ date,account,category,amount,currency,converted amount,currency,description
     async fn test_execute_upload_missing_file() {
         let (state, user_id) = registered_state().await;
         let cmd = parse_command("upload /nonexistent/x.csv").unwrap();
+        let err = execute(&state, user_id, &cmd).await.unwrap_err();
+        assert!(err.to_string().contains("cannot read"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_upload_non_http_prefix_is_read_as_path() {
+        let (state, user_id) = registered_state().await;
+        let cmd = parse_command("upload file:///nonexistent/x.html").unwrap();
         let err = execute(&state, user_id, &cmd).await.unwrap_err();
         assert!(err.to_string().contains("cannot read"));
     }

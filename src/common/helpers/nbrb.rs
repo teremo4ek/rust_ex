@@ -1,10 +1,8 @@
-use std::sync::OnceLock;
-use std::time::Duration;
-
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
+use super::http;
 use crate::common::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Copy)]
@@ -29,18 +27,6 @@ struct RateResponse {
 }
 
 // check api https://www.nbrb.by/apihelp/exrates
-// shared client with a timeout: get_rate sits on the upload request path,
-// a hung connection would stall upload indefinitely
-fn client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .unwrap_or_default()
-    })
-}
-
 pub async fn get_rate(currency: Currency, date: NaiveDate) -> AppResult<Decimal> {
     let url = format!(
         "https://api.nbrb.by/exrates/rates/{}?parammode=2&ondate={}",
@@ -48,7 +34,7 @@ pub async fn get_rate(currency: Currency, date: NaiveDate) -> AppResult<Decimal>
         date
     );
 
-    let response = client()
+    let response = http::client()?
         .get(&url)
         .send()
         .await

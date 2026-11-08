@@ -61,6 +61,14 @@ fn pdf_fixture_path() -> String {
         .to_string()
 }
 
+fn html_fixture_path() -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/check3.html")
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
 fn receipt_match_fixture_path() -> String {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/receipt_match.csv")
@@ -194,6 +202,23 @@ async fn cli_upload_pdf_receipt() {
         "No matching expense for receipt 2026-11-02, 11.51 BYN — saved as pending, will attach when the CSV row is imported"
     ));
     assert!(!stdout.contains("Groceries"));
+    cleanup_db(&db_path);
+}
+
+#[tokio::test]
+async fn cli_upload_html_receipt_pending() {
+    let (db_url, db_path) = temp_db_url();
+    let script = format!(
+        "2\nuser@example.com\npassword123\nupload {}\nreceipts\nexit\n",
+        html_fixture_path()
+    );
+    let (stdout, _stderr, code) = run_cli_with_db(&["cli"], &script, &db_url);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains(
+        "No matching expense for receipt 2026-09-15, 13.76 BYN — saved as pending, will attach when the CSV row is imported"
+    ));
+    assert!(stdout.contains("2026-09-15"));
+    assert!(stdout.contains("13.76"));
     cleanup_db(&db_path);
 }
 
