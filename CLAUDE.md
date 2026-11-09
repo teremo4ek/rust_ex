@@ -1,12 +1,9 @@
 # Build & Test
 
 - Build: `cargo build`
-- Test all: `cargo test`
-- Unit tests only: `cargo test --lib`
-- Integration tests only: `cargo test --tests`
+- Test all: `cargo test`; unit only: `cargo test --lib`; integration only: `cargo test --tests`
 - Lint: `cargo clippy`
-- Run server: `cargo run`
-- Run CLI: `cargo run -- cli`
+- Run server: `cargo run`; run CLI: `cargo run -- cli`
 
 Always run `cargo clippy` and `cargo test` before reporting work as done.
 
@@ -21,67 +18,49 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 
 # Architecture
 
-- Persistence: SQLite via sqlx 0.8. `src/common/db.rs` builds the pool (`foreign_keys` ON, `create_if_missing`) and runs `sqlx::migrate!()` from `migrations/`. Runtime queries only (`sqlx::query`/`query_as`/`QueryBuilder` + `#[derive(FromRow)]`); no compile-time `query!` macros. `AppState { pool, jwt_secret, jwt_expires_in }`; `from_config` is async and runs migrations
-- Layout: `src/common` (shared: models, services, state, config, db, error), `src/web` (HTTP: routes, handlers, middleware), `src/cli` (console session). `src/main.rs` dispatches: no args → server, `cli` → console mode, anything else → usage + exit 2
-- Auth: custom `AuthUser` extractor in `src/web/middleware/auth.rs` validates JWT from `Authorization` header
-- CSV parsing: Monefy format, 8 columns with duplicate "currency" header — use `csv::StringRecord` manually, not serde deserialization (serde can't handle duplicate column names)
-- Receipt import: `src/common/services/receipt_service.rs` — web upload and CLI both go through `expense_service::import_bytes` (sniffs `%PDF-` magic bytes → `import_receipt`, else `looks_like_html` → `import_html`, else CSV import, then USD conversion); PDF text extraction shells out to `pdftotext -layout - -` (external binary, no PDF crate), HTML extraction (`extract_html_text`) pulls `<pre>` blocks dependency-free (strip nested tags, decode entities, one line per block). One shared parser handles both store formats: Euroopt item blocks (digit code line → name → price line → optional `Скидка` line, the negative discount is added to the line total) and "Соседи" codeless blocks (name → `1.39 *1.000 1.39` price line; `Idle` holds the last non-price line as the name candidate, `code = ""`). Discount lines accept label forms `скидка` / `скидка=` / `скидка:` (case-insensitive; Euroopt writes `Скидка -0.06`, Соседи `Скидка= 0.45`) and the sign is normalized to negative (`-abs`), so both reduce the line total. Receipts NEVER create expenses — the CSV stays the sole source of transactions and balances. The importer parses date/total/account/УИ (fiscal id)/items, dedups by `(user_id, fiscal_id)` with `INSERT … ON CONFLICT DO NOTHING` inside the import tx (no read-then-insert race) → lost insert means `status = duplicate`, and a still-pending duplicate retries the attach on re-upload; then attaches to the best expense matching by date (`kind = expense`, BYN, no receipt yet): exact `amount == total` wins (first by rowid), otherwise the closest with `|amount − total| < 1` BYN, minimal delta, tie → rowid (`MATCH_TOLERANCE`; amounts compared as `Decimal` in Rust, never TEXT equality). No match → stored pending (`receipts.expense_id IS NULL`); `import_csv` calls `attach_pending_receipts` inside its tx (two passes: exact matches for every pending receipt first, then tolerance — an earlier pending receipt can't tolerance-attach to an expense a later one matches exactly), so the next CSV upload auto-attaches and reports `receipts_attached`. Deleting an expense reverts its receipt to pending (`ON DELETE SET NULL`); `receipt_items` cascade on receipt delete. Tables: `receipts`, `receipt_items` (see `0001_init.sql`)
-- Receipt by URL: `POST /api/receipts/url` (JSON `{"url": "..."}`, same response as file upload via shared `outcome_response`) and CLI `upload <url>` both call `expense_service::import_url` → `helpers::http::fetch_bytes` (shared reqwest client from `helpers::http::client()`, 10s timeout, http/https only, 2 MiB cap; errors: bad url/scheme/size → BadRequest, transport/HTTP status → ExternalApi) → `import_bytes`, so a URL pointing at a PDF, HTML page, or CSV all work. SSRF guard: every hop's host is resolved and loopback/private/link-local/documentation addresses → BadRequest; the shared client has auto-redirects off and `fetch_bytes` follows redirects itself (max 5) so each hop re-passes the check
-- USD conversion: post-import step (`usd_conversion::convert_to_usd`, runs inside `expense_service::import_bytes` → web upload + CLI) fills `expenses.amount_usd` — BYN via the `nbrb_rates` cache (miss → NBRB `get_rate`), USD copies `amount`, other currencies stay NULL. Best-effort: failed dates stay NULL and retry on the next upload (`amount_usd IS NULL` = pending)
-- Error handling: all errors go through `AppError` in `src/common/error.rs` — add new variants there, never return raw library errors from handlers
-- Lib+bin layout: `src/lib.rs` exposes modules for integration tests, `src/main.rs` is dispatch + server startup
+- Layout: `src/common` (models, services, state, config, db, error, helpers), `src/web` (routes, handlers, middleware), `src/cli` (console session). `src/lib.rs` exposes modules for tests; `src/main.rs` dispatches: no args → server, `cli` → console mode, anything else → usage + exit 2
+- Persistence: SQLite via sqlx 0.8; `src/common/db.rs` builds the pool (`foreign_keys` ON, `create_if_missing`) and runs `sqlx::migrate!()`. Runtime queries only (`query`/`query_as`/`QueryBuilder` + `#[derive(FromRow)]`), no compile-time `query!` macros. `AppState { pool, jwt_secret, jwt_expires_in }`
+- Auth: custom `AuthUser` extractor (`src/web/middleware/auth.rs`) validates JWT from the `Authorization` header
+- Errors: all go through `AppError` (`src/common/error.rs`) — add new variants there, never return raw library errors from handlers
+- Import pipeline: web upload (`POST /api/expenses/upload`, `POST /api/receipts/url`) and CLI `upload` all funnel into `expense_service::import_bytes`, which sniffs content: `%PDF-` → `receipt_service::import_receipt` (external `pdftotext -layout - -`), HTML (`looks_like_html`) → `import_html` (dependency-free `<pre>` extraction), else Monefy CSV; then USD conversion. URL uploads go via `helpers::http::fetch_bytes`: http/https only, 2 MiB cap, max 5 redirects, SSRF guard resolves every hop's host (loopback/private/link-local → BadRequest)
+- Receipts NEVER create expenses — CSV is the sole source of transactions. Receipts parse (date/total/account/УИ/items, one shared parser for Euroopt and "Соседи" formats), dedup by `(user_id, fiscal_id)` (`INSERT … ON CONFLICT DO NOTHING` → `status = duplicate`), then attach to a same-date BYN expense without a receipt: exact total wins, else closest within `MATCH_TOLERANCE` (< 1 BYN); no match → pending, auto-attached by the next CSV upload (`attach_pending_receipts` inside the import tx — exact pass for all pending receipts runs before the tolerance pass)
+- USD conversion: `usd_conversion::convert_to_usd` fills `expenses.amount_usd` (BYN via `nbrb_rates` cache → NBRB API on miss, USD copies `amount`, other currencies NULL). Best-effort: `amount_usd IS NULL` retries on the next upload
 
 # Testing
 
-- Unit tests: `#[cfg(test)] mod tests` inside the same file
-- Integration tests: `tests/` directory, use `tower::ServiceExt::oneshot` with `axum::body::Body`
-- Test helper: `tests/common/mod.rs` — use `create_test_app()` (async; isolated `sqlite::memory:` pool) and `register_and_login()` for setup
-- Unit tests seed data via `register` + `import_csv` (AppState has no collections to poke); `tests/cli_tests.rs` injects a unique temp DB file per test via `Command::env("DATABASE_URL", ...)` — dotenvy never overrides preset env vars
-- Conversion tests stay offline: unit tests inject a rate fetcher into `usd_conversion::convert`; upload tests seed `nbrb_rates` first (in-crate: `usd_conversion::seed_usd_rates` / `seed_usd_rate` for a single date; integration: `common::seed_fixture_rates` / `common::seed_rate` or direct INSERT on `state.pool`; CLI binary tests: `db::connect` on the temp DB before spawning)
-- Fixtures: `tests/fixtures/monefy.csv` (CSV upload/analytics tests), `tests/fixtures/receipt_match.csv` (one-row CSV matching check.pdf by 2026-11-02 + 11.51), `tests/fixtures/check.pdf` / `check2.pdf` (sanitized Euroopt receipts — real store layout with card numbers/addresses/names/УИ/terminal data replaced by test values, with and without per-item discounts; fixture УИs `…A1`/`…A2`; `receipt_service` unit tests embed matching text as `RECEIPT_TEXT` / `DISCOUNT_RECEIPT_TEXT` with distinct УИs `…001`/`…002` so DB tests don't collide on `(user_id, fiscal_id)`), and `tests/fixtures/check3.html` (sanitized "Соседи" receipt page, УИ `…A3`; unit tests embed sanitized text as `SOSEDI_RECEIPT_TEXT` with a distinct УИ `…010`, HTML-extraction tests use the raw file — no pdftotext needed), `tests/fixtures/check4.html` (sanitized "Соседи" receipt with a `Скидка= 0.45` discount line, УИ `…A4`; unit tests embed sanitized text as `SOSEDI_DISCOUNT_RECEIPT_TEXT` with a distinct УИ `…013`, HTML-extraction tests use the raw file). Receipt tests marked ⚙ call local `pdftotext`; URL-fetch tests are offline (validation only — invalid/empty/non-http URLs), never hit the network
-- Each test file creates its own app instance (fresh state, no test pollution)
+- Unit tests: `#[cfg(test)] mod tests` inside the same file; integration tests in `tests/` via `tower::ServiceExt::oneshot` + `axum::body::Body`
+- `tests/common/mod.rs`: `create_test_app()` (isolated `sqlite::memory:` pool) and `register_and_login()`; each test file builds its own app
+- Seeding: unit tests call services directly (`register` + `import_csv`); CLI tests spawn the real binary (`CARGO_BIN_EXE_expense_tracker`) with a unique temp DB per test (`Command::env("DATABASE_URL", …)` — dotenvy never overrides preset env)
+- Conversion tests stay offline: inject a rate fetcher into `usd_conversion::convert`, or seed `nbrb_rates` (`usd_conversion::seed_usd_rate(s)` in-crate; `common::seed_rate(s)` in integration tests)
+- Fixtures: `monefy.csv`, `receipt_match.csv` (one row matching check.pdf), `check.pdf`/`check2.pdf` (Euroopt), `check3.html`/`check4.html` (Соседи) — all sanitized. Fixture УИs (`…A1`–`…A4`) differ from embedded test-const УИs so DB tests don't collide on `(user_id, fiscal_id)`. Receipt tests marked ⚙ need local `pdftotext`; URL tests are validation-only, no network
 
 # Debug Mode
 
-- Only compiled in debug builds (`cargo run`), absent in release (`cargo build --release`)
-- `src/common/debug_setup.rs` (library module under `#[cfg(debug_assertions)]`, used by both server startup and the CLI) seeds the debug user idempotently (`INSERT ... ON CONFLICT DO NOTHING`), token is fixed
-- Credentials: `debug@example.com` / `debug123`
-- Token is printed to console on startup and is deterministic (same token every restart)
-- Debug JWT secret overrides `.env` `JWT_SECRET` in debug builds
-- In debug builds the CLI also seeds this user: auth menu has `3) Continue as debug user (debug@example.com)`, and `1) Login` works with the debug credentials; release builds show only Login/Register
+- Debug builds only (`#[cfg(debug_assertions)]`, `src/common/debug_setup.rs`), used by server startup and the CLI
+- Seeds `debug@example.com` / `debug123` idempotently; deterministic token printed on startup; debug JWT secret overrides `.env` `JWT_SECRET`
+- Debug CLI auth menu adds `3) Continue as debug user`; release builds show only Login/Register
 
 # CLI Mode
 
-- `cargo run -- cli` — interactive session: no HTTP listener, no tracing; loads `.env` and requires `DATABASE_URL` exactly like the server
-- Data persists in the DB file across runs; JWT secret stays random per run (token is discarded within the session); debug builds additionally seed the debug user (see Debug Mode)
-- Commands: `upload <path|url>` (Monefy CSV, Euroopt PDF/HTML receipt file, or receipt URL — `http://`/`https://` prefix routes to `import_url`), `stats [summary|category|account|timeline [day|week]] [from <date>] [to <date>]`, `receipts` (list pending), `help`, `exit`/`quit`; EOF (Ctrl-D) exits cleanly
-- `src/cli/session.rs` `run()` takes `&mut dyn BufRead` + `&mut dyn Write` so unit tests drive sessions from byte scripts
-- `tests/cli_tests.rs` spawns the real binary via `CARGO_BIN_EXE_expense_tracker` with piped stdin
+- `cargo run -- cli`: interactive session, no HTTP listener or tracing; loads `.env`, requires `DATABASE_URL` like the server
+- Commands: `upload <path|url>`, `stats [summary|category|account|timeline [day|week]] [from <date>] [to <date>]`, `receipts`, `help`, `exit`/`quit`; EOF exits cleanly
+- `src/cli/session.rs` `run()` takes `&mut dyn BufRead` + `&mut dyn Write` so tests drive sessions from byte scripts
 
 # Gotchas
 
-- Monefy CSV has two columns named "currency" — serde deserialize fails on this, always use `StringRecord` index-based parsing
-- CSV reader must use `.flexible(true)` to handle empty trailing rows (Monefy exports these)
-- `csv` field indices: 0=date, 1=account, 2=category, 3=amount, 4=currency, 5=converted amount, 6=currency (dup), 7=description
-- Account enum serializes as "Cash" and "Payment_card" via `snake_case` — display is "Cash" / "Payment card" (space, not underscore)
-- Money is `rust_decimal::Decimal` end-to-end (never `f64`): `Expense.amount`, analytics DTOs, NBRB rate helper. JSON money fields serialize as strings ("793", "559.17"); `dec!()` needs the `macros` feature
-- Amounts are always positive everywhere (DB, model, JSON); direction lives in `kind` — lowercase TEXT `'expense'`/`'income'` in SQLite, `TransactionKind` enum with `Display`/`FromStr` round-tripping the same strings (unlike `account`, no second display form). The sign exists only in Monefy CSV input: import maps negative rows to `kind = expense` + `abs(amount)`, positive to `kind = income`. CSV dedup key includes `kind`
-- `Decimal` equality is value-based (`dec!(100) == dec!(100.0)`), scale only affects serialization; CLI renders 2 dp via `{:.2}` (Display supports precision)
-- sqlx 0.8 has no rust_decimal support for SQLite: amounts are stored as TEXT — bind `Decimal::to_string()`, parse on read. Never `SUM(amount)` in SQL (SQLite coerces TEXT to REAL → float drift); all Decimal aggregation stays in Rust (`analytics_service`)
-- Dates are ISO TEXT in SQLite; bind `NaiveDate` directly (sqlx chrono feature encodes `%F`); `account` column stores display form "Cash"/"Payment card" while API JSON stays `snake_case`
-- List order is `ORDER BY rowid` (insertion order — UUID ids would randomize it)
-- `sqlite::memory:` is private per connection: test pools need `max_connections(1)` with `idle_timeout`/`max_lifetime` disabled (`src/common/db.rs` handles this)
-- `foreign_keys` is per-connection — set via `SqliteConnectOptions` in `src/common/db.rs`, never a one-off PRAGMA
-- Migrations are embedded at compile time (`sqlx::migrate!`) — new migration files require a rebuild
-- `amount_usd` is Decimal-as-TEXT like `amount`; `nbrb_rates` caches `(date, currency, base_currency) → rate` as TEXT. A corrupt cached rate falls through to a refetch that overwrites it (`INSERT OR REPLACE`)
-- NBRB has a rate for every calendar date (weekends/holidays repeat the last set one), so no fallback walk-back; `get_rate` uses the shared reqwest client `helpers::http::client()` (10s timeout, no auto-redirects — it also sits on the upload request path); `Decimal / 0` panics — conversion guards `rate > 0`
-- Euroopt price-line multipliers are Cyrillic `х`/`Х` or Latin `x`/`X`, Соседи uses `*` glued to quantity (`1.39 *1.000  1.39`; 2 UTF-8 bytes for the Cyrillic ones) — strip via `strip_prefix`, never `&s[1..]` (byte slicing panics on non-char boundary)
-- Receipt parsing runs `pdftotext` synchronously in the async context (same tradeoff as argon2 in `auth_service`); a broken pipe on stdin write means pdftotext rejected the input → BadRequest, spawn failure (poppler missing) → Internal
-- Receipt-matching SQL must use `NOT EXISTS (SELECT 1 FROM receipts r WHERE r.expense_id = expenses.id)`, never `id NOT IN (...)`: `NOT IN` over a set containing NULL (pending receipts) evaluates to NULL and silently matches nothing
-- Receipt УИ line is `УИ: <hex>` (Euroopt) or `УИ <hex>` without colon (Соседи) — parse by `strip_prefix("УИ:")` OR `strip_prefix("УИ ")` on the trimmed line; missing/empty УИ is a BadRequest, receipts without it can't be deduplicated
-- Receipt dates: a date token followed by a time token (`dd-mm-yyyy hh:mm` Euroopt / `dd.mm.yyyy hh:mm[:ss]` Соседи) always wins over bare dates, so promo footers (`с dd.mm.yyyy по dd.mm.yyyy`) can't hijack the receipt date; with no date+time pair anywhere the first bare date is the fallback. Both Euroopt test consts also contain a dotted card-slip date equal to the dash one
-- A price-shaped line in `Idle` with no name candidate is skipped, not an error — wrapped pdftotext output must not reject a real receipt; a genuinely broken codeless block still fails the total-mismatch check
-- Card-payment detection is case-insensitive `contains("картой")` — Euroopt writes `ПЛ. КАРТОЙ`, Соседи `Банк. пл. картой:`
-- HTML tag search must use ASCII-lowercase (`to_ascii_lowercase` keeps byte offsets identical, so slices of the original stay on char boundaries); Unicode `to_lowercase` can change byte lengths (e.g. `İ`) and is only safe for plain `contains` checks
-- `strip_tags`/`find_tag_close`: `<` only opens a tag before an ASCII letter, `/` or `!` (HTML tag-open state) — bare `<`/`>` in text stay literal; the tag-end scan skips `>` inside quoted attributes (`<pre class="a>b">`)
-- `looks_like_html` runs after the `%PDF-` sniff: BOM-stripped, whitespace-skipped prefix case-insensitively `<!doctype`/`<html`, or `<pre` followed by a delimiter byte (`>`/whitespace/`/`, same rule as `find_pre_open`) anywhere — so `<premium` in a CSV description can't misroute the CSV into the HTML branch; `%PDF-` must stay first or corrupt PDFs would drift into the HTML branch
+- Monefy CSV: duplicate "currency" headers break serde — parse `csv::StringRecord` by index (0=date, 1=account, 2=category, 3=amount, 4=currency, 5=converted, 6=currency dup, 7=description) with `.flexible(true)` (empty trailing rows)
+- Account enum: `snake_case` in API JSON ("Payment_card") vs display form ("Payment card") — the DB column stores the display form
+- Money is `rust_decimal::Decimal` end-to-end, never `f64`; JSON money fields are strings; `dec!()` needs the `macros` feature; CLI renders 2 dp via `{:.2}`
+- Amounts are positive everywhere; direction lives in `kind` (`'expense'`/`'income'`) — the sign exists only in CSV input. CSV dedup key includes `kind`
+- sqlx 0.8 lacks rust_decimal for SQLite: amounts are TEXT (`Decimal::to_string()` on write, parse on read); never `SUM(amount)` in SQL (TEXT→REAL float drift) — Decimal aggregation stays in Rust (`analytics_service`)
+- Dates are ISO TEXT; bind `NaiveDate` directly (sqlx chrono encodes `%F`); lists order by `rowid` (insertion order)
+- `sqlite::memory:` is private per connection: test pools need `max_connections(1)` and no `idle_timeout`/`max_lifetime` (`src/common/db.rs`); `foreign_keys` is per-connection — set in connect options, never a one-off PRAGMA
+- Migrations are compile-time embedded — new files need a rebuild
+- NBRB has a rate for every calendar date (no walk-back fallback); `Decimal / 0` panics — conversion guards `rate > 0`; a corrupt cached rate refetches and overwrites (`INSERT OR REPLACE`)
+- Receipt matching SQL uses `NOT EXISTS (… r.expense_id = expenses.id)`, never `id NOT IN (…)` — NULL pending receipts make `NOT IN` match nothing
+- УИ line: `УИ: <hex>` (Euroopt) or `УИ <hex>` (Соседи) — try both `strip_prefix` forms on the trimmed line; missing УИ → BadRequest (can't dedup)
+- Receipt date: a date+time pair beats any bare date (promo footers `с dd.mm.yyyy по …` must not hijack it); discount labels `скидка`/`скидка=`/`скидка:` normalize to `-abs`
+- Price multipliers: Cyrillic `х`/`Х` or Latin `x`/`X`, Соседи `*` — strip via `strip_prefix`, never byte slicing (`&s[1..]` panics on 2-byte Cyrillic)
+- Card-payment detection is case-insensitive `contains("картой")`
+- HTML: lowercase tags with `to_ascii_lowercase` (byte offsets preserved; Unicode `to_lowercase` can change length); `<` opens a tag only before an ASCII letter/`/`/`!`; the tag-end scan skips `>` inside quoted attributes; `looks_like_html` runs after the `%PDF-` sniff and needs `<pre` + delimiter byte, so `<premium` in CSV text can't misroute
+- Receipt parsing runs `pdftotext` synchronously in the async context (same tradeoff as argon2); broken stdin pipe → BadRequest, spawn failure (poppler missing) → Internal
