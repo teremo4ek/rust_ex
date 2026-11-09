@@ -103,9 +103,9 @@ date,account,category,amount,currency,converted amount,currency,description
 Receipts **never create or modify transactions** — the CSV stays the single source of truth for balances and analytics. A receipt *enriches* an existing expense:
 
 1. The parser extracts the date, total, account (card vs cash), the unique fiscal id (`УИ`), and every line item (code, name, unit price, quantity, discount, line total); the items sum is cross-checked against the receipt total.
-2. The receipt is matched against the user's expenses by date + amount == total (`kind = expense`, currency `BYN`, no receipt attached yet); the first match in insertion order wins.
+2. The receipt is matched against the user's expenses by date (`kind = expense`, currency `BYN`, no receipt attached yet): an exact `amount == total` match wins (first in insertion order), otherwise the closest free expense within 1 BYN attaches (minimal delta, earliest on ties).
 3. Exactly one match → the items are stored as a sub-table under that expense (`GET /api/expenses/{id}/receipt` returns them).
-4. No match → the receipt is stored as **pending** with a clear warning (`GET /api/receipts/pending`, CLI `receipts`); every later CSV import retries matching and reports `receipts_attached`.
+4. No match → the receipt is stored as **pending** with a clear warning (`GET /api/receipts/pending`, CLI `receipts`); every later CSV import retries matching and reports `receipts_attached` (exact matches for all pending receipts are tried before any tolerance match).
 5. Re-uploading a receipt with the same `УИ` is reported as a duplicate; if the stored copy is still pending, the re-upload retries matching it against a free expense.
 6. Deleting an expense reverts its receipt to pending (`ON DELETE SET NULL`), so it re-attaches when the CSV row reappears.
 
@@ -214,8 +214,8 @@ tests/
 
 ## Testing
 
-- **89 unit tests** — CSV and receipt parsing, receipt matching, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
-- **35 integration tests** — 25 web flows via `tower::ServiceExt::oneshot`, 10 CLI flows by spawning the real binary (including data persistence across runs)
+- **122 unit tests** — CSV and receipt parsing, receipt matching, analytics calculations, JWT generation/validation, password hashing, CLI commands/session
+- **39 integration tests** — 28 web flows via `tower::ServiceExt::oneshot`, 11 CLI flows by spawning the real binary (including data persistence across runs)
 
 ```sh
 cargo test              # run all tests
