@@ -342,7 +342,7 @@ date,account,category,amount,currency,converted amount,currency,description
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(receipt["total"].as_str().unwrap(), "11.51");
-    assert_eq!(receipt["fiscal_id"].as_str().unwrap(), "EDDA8397564658AE0718A4AB");
+    assert_eq!(receipt["fiscal_id"].as_str().unwrap(), "0000000000000000000000A1");
     let items = receipt["items"].as_array().unwrap();
     assert_eq!(items.len(), 4);
     assert!(items[0].get("receipt_id").is_none());
@@ -489,7 +489,7 @@ async fn test_upload_html_receipt() {
     assert_eq!(receipts.len(), 1);
     assert_eq!(
         receipts[0]["fiscal_id"].as_str().unwrap(),
-        "EC48CAF708764A540719225F"
+        "0000000000000000000000A3"
     );
     let items = receipts[0]["items"].as_array().unwrap();
     assert_eq!(items.len(), 6);

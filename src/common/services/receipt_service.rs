@@ -1028,7 +1028,7 @@ mod tests {
                ------------------------------------------"#;
 
     const SOSEDI_RECEIPT_TEXT: &str = r#"    Общество с ограниченной ответственностью
-                   "Либретик"
+                   "Тестторг"
                 Магазин "Соседи"
          г. Минск УЛ. ПРИМЕРНАЯ, 1
 УНП 100000000                  РН СККО 100000003
@@ -1059,7 +1059,7 @@ mod tests {
 Сумма                              13,76 BYN"#;
 
     const SOSEDI_DISCOUNT_RECEIPT_TEXT: &str = r#"    Общество с ограниченной ответственностью
-                   "Либретик"
+                   "Тестторг"
                 Магазин "Соседи"
          г. Минск УЛ. ПРИМЕРНАЯ, 1
 УНП 100000000                  РН СККО 100000004
@@ -1379,7 +1379,7 @@ date,account,category,amount,currency,converted amount,currency,description
         assert_eq!(receipt.items.len(), 4);
         let sum: Decimal = receipt.items.iter().map(|i| i.total).sum();
         assert_eq!(sum, dec!(11.51));
-        assert_eq!(receipt.fiscal_id, "EDDA8397564658AE0718A4AB");
+        assert_eq!(receipt.fiscal_id, "0000000000000000000000A1");
     }
 
     #[test]
@@ -1390,7 +1390,7 @@ date,account,category,amount,currency,converted amount,currency,description
         assert_eq!(receipt.items.len(), 6);
         let sum: Decimal = receipt.items.iter().map(|i| i.total).sum();
         assert_eq!(sum, dec!(14.73));
-        assert_eq!(receipt.fiscal_id, "BD79D40E63885B830718A4B2");
+        assert_eq!(receipt.fiscal_id, "0000000000000000000000A2");
     }
 
     #[test]
@@ -1401,7 +1401,7 @@ date,account,category,amount,currency,converted amount,currency,description
         assert_eq!(receipt.items.len(), 6);
         let sum: Decimal = receipt.items.iter().map(|i| i.total).sum();
         assert_eq!(sum, dec!(13.76));
-        assert_eq!(receipt.fiscal_id, "EC48CAF708764A540719225F");
+        assert_eq!(receipt.fiscal_id, "0000000000000000000000A3");
         assert_eq!(receipt.date, NaiveDate::from_ymd_opt(2026, 9, 15).unwrap());
         assert_eq!(receipt.account, Account::PaymentCard);
     }
@@ -1416,7 +1416,7 @@ date,account,category,amount,currency,converted amount,currency,description
         assert_eq!(sum, dec!(17.37));
         assert_eq!(receipt.items[1].discount, dec!(-0.45));
         assert_eq!(receipt.items[1].total, dec!(3.49));
-        assert_eq!(receipt.fiscal_id, "A99BE40C6165E6AF0719225D");
+        assert_eq!(receipt.fiscal_id, "0000000000000000000000A4");
         assert_eq!(receipt.date, NaiveDate::from_ymd_opt(2026, 8, 28).unwrap());
         assert_eq!(receipt.account, Account::PaymentCard);
     }
