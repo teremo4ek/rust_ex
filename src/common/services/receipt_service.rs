@@ -3,7 +3,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, dec};
 use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
@@ -418,6 +418,8 @@ enum AttachOutcome {
     NoMatch,
 }
 
+const MATCH_TOLERANCE: Decimal = dec!(1);
+
 async fn try_attach(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     user_id: Uuid,
@@ -436,24 +438,43 @@ async fn try_attach(
     .fetch_all(&mut **tx)
     .await?;
 
+    let mut closest: Option<(Decimal, String)> = None;
     for (id, amount) in rows {
         let amount: Decimal = amount
             .parse()
             .map_err(|_| AppError::Database("invalid amount stored in expenses".into()))?;
-        if amount != total {
-            continue;
+        let delta = (amount - total).abs();
+        if delta.is_zero() {
+            return attach_receipt_to_expense(tx, receipt_id, &id).await;
         }
-        let expense_id: Uuid = id
-            .parse()
-            .map_err(|_| AppError::Database("invalid expense id stored in expenses".into()))?;
-        sqlx::query("UPDATE receipts SET expense_id = ? WHERE id = ?")
-            .bind(expense_id.to_string())
-            .bind(receipt_id.to_string())
-            .execute(&mut **tx)
-            .await?;
-        return Ok(AttachOutcome::Attached(expense_id));
+        let closer = match &closest {
+            Some((best, _)) => delta < *best,
+            None => true,
+        };
+        if delta < MATCH_TOLERANCE && closer {
+            closest = Some((delta, id));
+        }
     }
-    Ok(AttachOutcome::NoMatch)
+    match closest {
+        Some((_, id)) => attach_receipt_to_expense(tx, receipt_id, &id).await,
+        None => Ok(AttachOutcome::NoMatch),
+    }
+}
+
+async fn attach_receipt_to_expense(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    receipt_id: Uuid,
+    expense_id: &str,
+) -> AppResult<AttachOutcome> {
+    let expense_id: Uuid = expense_id
+        .parse()
+        .map_err(|_| AppError::Database("invalid expense id stored in expenses".into()))?;
+    sqlx::query("UPDATE receipts SET expense_id = ? WHERE id = ?")
+        .bind(expense_id.to_string())
+        .bind(receipt_id.to_string())
+        .execute(&mut **tx)
+        .await?;
+    Ok(AttachOutcome::Attached(expense_id))
 }
 
 async fn insert_receipt(
@@ -1574,7 +1595,7 @@ date,account,category,amount,currency,converted amount,currency,description
         .bind(Uuid::new_v4().to_string())
         .bind(user_id.to_string())
         .bind(NaiveDate::from_ymd_opt(2026, 11, 2).unwrap())
-        .bind("11.51")
+        .bind("11.52")
         .bind("Payment card")
         .bind("000000000000000000000009")
         .execute(&state.pool)
@@ -1589,6 +1610,83 @@ date,account,category,amount,currency,converted amount,currency,description
             .await
             .unwrap();
         assert_eq!(report.receipts_attached, 0);
+        assert_eq!(list_pending_receipts(&state, user_id).await.unwrap().len(), 1);
+    }
+
+    async fn attached_expense_amount(state: &AppState) -> String {
+        sqlx::query_scalar("SELECT e.amount FROM expenses e JOIN receipts r ON r.expense_id = e.id")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_import_receipt_attaches_within_tolerance() {
+        let (state, user_id) = registered_state().await;
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+11/2/2026,Payment card,Food,-11.52,BYN,-11.52,BYN,Euroopt
+";
+        expense_service::import_csv(&state, user_id, csv)
+            .await
+            .unwrap();
+        let pdf = include_bytes!("../../../tests/fixtures/check.pdf");
+        let report = import_receipt(&state, user_id, pdf).await.unwrap();
+        assert_eq!(report.status, ReceiptStatus::Attached);
+        assert!(list_pending_receipts(&state, user_id)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_exact_match_preferred_over_tolerance() {
+        let (state, user_id) = registered_state().await;
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+11/2/2026,Payment card,Food,-11.52,BYN,-11.52,BYN,Rounded entry
+11/2/2026,Payment card,Food,-11.51,BYN,-11.51,BYN,Euroopt
+";
+        expense_service::import_csv(&state, user_id, csv)
+            .await
+            .unwrap();
+        let pdf = include_bytes!("../../../tests/fixtures/check.pdf");
+        let report = import_receipt(&state, user_id, pdf).await.unwrap();
+        assert_eq!(report.status, ReceiptStatus::Attached);
+        assert_eq!(attached_expense_amount(&state).await, "11.51");
+    }
+
+    #[tokio::test]
+    async fn test_closest_candidate_wins_over_earlier_row() {
+        let (state, user_id) = registered_state().await;
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+11/2/2026,Payment card,Food,-12.40,BYN,-12.40,BYN,Rounded up
+11/2/2026,Payment card,Food,-11.52,BYN,-11.52,BYN,Euroopt
+";
+        expense_service::import_csv(&state, user_id, csv)
+            .await
+            .unwrap();
+        let pdf = include_bytes!("../../../tests/fixtures/check.pdf");
+        let report = import_receipt(&state, user_id, pdf).await.unwrap();
+        assert_eq!(report.status, ReceiptStatus::Attached);
+        assert_eq!(attached_expense_amount(&state).await, "11.52");
+    }
+
+    #[tokio::test]
+    async fn test_delta_of_one_ruble_does_not_attach() {
+        let (state, user_id) = registered_state().await;
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+11/2/2026,Payment card,Food,-12.51,BYN,-12.51,BYN,Euroopt
+11/2/2026,Payment card,Food,-10.51,BYN,-10.51,BYN,Euroopt
+";
+        expense_service::import_csv(&state, user_id, csv)
+            .await
+            .unwrap();
+        let pdf = include_bytes!("../../../tests/fixtures/check.pdf");
+        let report = import_receipt(&state, user_id, pdf).await.unwrap();
+        assert_eq!(report.status, ReceiptStatus::Pending);
         assert_eq!(list_pending_receipts(&state, user_id).await.unwrap().len(), 1);
     }
 
