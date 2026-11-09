@@ -141,7 +141,7 @@ mod tests {
             total: dec!(11.51),
             currency: "BYN".into(),
             account: crate::common::models::Account::PaymentCard,
-            fiscal_id: "EDDA8397564658AE0718A4AB".into(),
+            fiscal_id: "0000000000000000000000A1".into(),
             items: vec![
                 crate::common::models::ReceiptItem {
                     receipt_id: uuid::Uuid::new_v4(),
