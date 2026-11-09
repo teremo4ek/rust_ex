@@ -341,8 +341,18 @@ fn parse_price_line(line: &str) -> Option<(Decimal, Decimal, Decimal)> {
 fn parse_discount_line(line: &str) -> Option<Decimal> {
     let mut tokens = line.split_whitespace();
     match (tokens.next(), tokens.next(), tokens.next()) {
-        (Some(label), Some(amount), None) if label.to_lowercase() == "скидка" => {
-            amount.parse().ok()
+        (Some(label), Some(amount), None) => {
+            // Euroopt writes 'Скидка -0.06', Sosedi 'Скидка= 0.45' — the sign
+            // differs by store, so normalize: a discount always reduces the total
+            if label
+                .to_lowercase()
+                .trim_end_matches(['=', ':'])
+                != "скидка"
+            {
+                return None;
+            }
+            let amount: Decimal = amount.parse().ok()?;
+            Some(-amount.abs())
         }
         _ => None,
     }
@@ -1048,6 +1058,33 @@ mod tests {
 ТЕРМИНАЛ: TEST0001
 Сумма                              13,76 BYN"#;
 
+    const SOSEDI_DISCOUNT_RECEIPT_TEXT: &str = r#"    Общество с ограниченной ответственностью
+                   "Либретик"
+                Магазин "Соседи"
+         г. Минск УЛ. ПРИМЕРНАЯ, 1
+УНП 100000000                  РН СККО 100000004
+               Платежный документ
+                 N док. 00004
+────────────────────────────────────────────────
+                               Цена Кол-во Итого
+ПЕЧЕНЬЕ ОВС. ТЕСТОВОЕ 300Г
+                               2.94 *1.000  2.94
+ПЕЧЕНЬЕ СПАРТАК ТЕСТОВОЕ 300Г
+                               3.94 *1.000  3.94
+Скидка= 0.45
+П/Ф ЦЫПЛ.БРОЙЛ.ФИЛЕ ТЕСТОВОЕ 1КГ
+                              16.99 *0.644 10.94
+────────────────────────────────────────────────
+ИТОГО К ОПЛАТЕ                             17.37
+ИТОГО СКИДКА                                0.45
+────────────────────────────────────────────────
+Банк. пл. картой:                          17.37
+────────────────────────────────────────────────
+Кассир: Иванова Анна Петровна 28.08.2026 20:21:53
+          УИ 000000000000000000000013
+ТЕРМИНАЛ: TEST0001
+Сумма                              17,37 BYN"#;
+
     const SOSEDI_MATCH_CSV: &str = "\
 date,account,category,amount,currency,converted amount,currency,description
 09/15/2026,Payment card,Food,-13.76,BYN,-13.76,BYN,Sosedi
@@ -1277,6 +1314,23 @@ date,account,category,amount,currency,converted amount,currency,description
     }
 
     #[test]
+    fn test_parse_receipt_sosedi_discount_applied() {
+        let receipt = parse_receipt(SOSEDI_DISCOUNT_RECEIPT_TEXT).unwrap();
+        assert_eq!(receipt.items.len(), 3);
+        assert!(receipt.items.iter().all(|i| i.code.is_empty()));
+        assert_eq!(receipt.items[0].discount, Decimal::ZERO);
+        assert_eq!(receipt.items[1].discount, dec!(-0.45));
+        assert_eq!(receipt.items[1].total, dec!(3.49));
+        assert_eq!(receipt.items[2].discount, Decimal::ZERO);
+        let sum: Decimal = receipt.items.iter().map(|i| i.total).sum();
+        assert_eq!(sum, dec!(17.37));
+        assert_eq!(receipt.total, dec!(17.37));
+        assert_eq!(receipt.date, NaiveDate::from_ymd_opt(2026, 8, 28).unwrap());
+        assert_eq!(receipt.account, Account::PaymentCard);
+        assert_eq!(receipt.fiscal_id, "000000000000000000000013");
+    }
+
+    #[test]
     fn test_parse_price_line_accepts_star() {
         assert_eq!(
             parse_price_line("1.39 *1.000  1.39"),
@@ -1286,6 +1340,15 @@ date,account,category,amount,currency,converted amount,currency,description
             parse_price_line("1.39 * 1.000 1.39"),
             Some((dec!(1.39), dec!(1.000), dec!(1.39)))
         );
+    }
+
+    #[test]
+    fn test_parse_discount_line_label_variants() {
+        assert_eq!(parse_discount_line("Скидка -0.06"), Some(dec!(-0.06)));
+        assert_eq!(parse_discount_line("Скидка= 0.45"), Some(dec!(-0.45)));
+        assert_eq!(parse_discount_line("СКИДКА: 0.45"), Some(dec!(-0.45)));
+        assert_eq!(parse_discount_line("ИТОГО СКИДКА 0.45"), None);
+        assert_eq!(parse_discount_line("Скидка 0.45 мусор"), None);
     }
 
     #[test]
@@ -1340,6 +1403,21 @@ date,account,category,amount,currency,converted amount,currency,description
         assert_eq!(sum, dec!(13.76));
         assert_eq!(receipt.fiscal_id, "EC48CAF708764A540719225F");
         assert_eq!(receipt.date, NaiveDate::from_ymd_opt(2026, 9, 15).unwrap());
+        assert_eq!(receipt.account, Account::PaymentCard);
+    }
+
+    #[test]
+    fn test_extract_html_text_fixture_parses_receipt_with_discount() {
+        let html = include_bytes!("../../../tests/fixtures/check4.html");
+        let text = extract_html_text(std::str::from_utf8(html).unwrap()).unwrap();
+        let receipt = parse_receipt(&text).unwrap();
+        assert_eq!(receipt.items.len(), 3);
+        let sum: Decimal = receipt.items.iter().map(|i| i.total).sum();
+        assert_eq!(sum, dec!(17.37));
+        assert_eq!(receipt.items[1].discount, dec!(-0.45));
+        assert_eq!(receipt.items[1].total, dec!(3.49));
+        assert_eq!(receipt.fiscal_id, "A99BE40C6165E6AF0719225D");
+        assert_eq!(receipt.date, NaiveDate::from_ymd_opt(2026, 8, 28).unwrap());
         assert_eq!(receipt.account, Account::PaymentCard);
     }
 
@@ -1481,6 +1559,10 @@ date,account,category,amount,currency,converted amount,currency,description
         std::str::from_utf8(include_bytes!("../../../tests/fixtures/check3.html")).unwrap()
     }
 
+    fn sosedi_discount_html() -> &'static str {
+        std::str::from_utf8(include_bytes!("../../../tests/fixtures/check4.html")).unwrap()
+    }
+
     #[tokio::test]
     async fn test_import_html_without_expense_is_pending() {
         let (state, user_id) = registered_state().await;
@@ -1494,6 +1576,24 @@ date,account,category,amount,currency,converted amount,currency,description
         let pending = list_pending_receipts(&state, user_id).await.unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].items.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn test_import_html_sosedi_discount_is_pending() {
+        let (state, user_id) = registered_state().await;
+        let report = import_html(&state, user_id, sosedi_discount_html())
+            .await
+            .unwrap();
+        assert_eq!(report.status, ReceiptStatus::Pending);
+        assert_eq!(report.date, NaiveDate::from_ymd_opt(2026, 8, 28).unwrap());
+        assert_eq!(report.total, dec!(17.37));
+        assert_eq!(report.currency, "BYN");
+        assert_eq!(report.item_count, 3);
+        assert_eq!(report.expense_id, None);
+        let pending = list_pending_receipts(&state, user_id).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].items[1].discount, dec!(-0.45));
+        assert_eq!(pending[0].items[1].total, dec!(3.49));
     }
 
     #[tokio::test]
