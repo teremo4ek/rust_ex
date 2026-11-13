@@ -1,6 +1,6 @@
 # Expense Tracker API
 
-A production-ready REST API for tracking and analyzing personal expenses. Upload CSV files exported from [Monefy](https://www.monefy.app/) or Euroopt receipt PDFs and get aggregated analytics via JSON endpoints.
+A production-ready REST API for tracking and analyzing personal expenses. Upload CSV files exported from [Monefy](https://www.monefy.com) and get aggregated analytics via JSON endpoints.
 
 Built with Rust to practice async programming, web frameworks, and modern Rust patterns.
 
@@ -29,13 +29,13 @@ Built with Rust to practice async programming, web frameworks, and modern Rust p
 
 ### Protected (require `Authorization: Bearer <token>`)
 
-| Method   | Path                          | Description                                        |
-| -------- | ----------------------------- | -------------------------------------------------- |
-| `POST`   | `/api/expenses/upload`        | Upload a Monefy CSV file or a Euroopt receipt PDF  |
-| `GET`    | `/api/expenses`               | List expenses with filters and pagination          |
-| `DELETE` | `/api/expenses/{id}`          | Delete an expense                                  |
-| `GET`    | `/api/expenses/{id}/receipt`  | Receipt line items attached to an expense          |
-| `GET`    | `/api/receipts/pending`       | Receipts stored but not yet matched to an expense  |
+| Method   | Path                         | Description                                       |
+| -------- | ---------------------------- | ------------------------------------------------- |
+| `POST`   | `/api/expenses/upload`       | Upload a Monefy CSV file or a Euroopt receipt PDF |
+| `GET`    | `/api/expenses`              | List expenses with filters and pagination         |
+| `DELETE` | `/api/expenses/{id}`         | Delete an expense                                 |
+| `GET`    | `/api/expenses/{id}/receipt` | Receipt line items attached to an expense         |
+| `GET`    | `/api/receipts/pending`      | Receipts stored but not yet matched to an expense |
 
 ### Analytics (require `Authorization: Bearer <token>`)
 
@@ -100,7 +100,7 @@ date,account,category,amount,currency,converted amount,currency,description
 
 `upload` also accepts Euroopt receipt PDFs (FastReport exports with a text layer — no OCR). Requires `pdftotext` (poppler) on `PATH`.
 
-Receipts **never create or modify transactions** — the CSV stays the single source of truth for balances and analytics. A receipt *enriches* an existing expense:
+Receipts **never create or modify transactions** — the CSV stays the single source of truth for balances and analytics. A receipt _enriches_ an existing expense:
 
 1. The parser extracts the date, total, account (card vs cash), the unique fiscal id (`УИ`), and every line item (code, name, unit price, quantity, discount, line total); the items sum is cross-checked against the receipt total.
 2. The receipt is matched against the user's expenses by date (`kind = expense`, currency `BYN`, no receipt attached yet): an exact `amount == total` match wins (first in insertion order), otherwise the closest free expense within 1 BYN attaches (minimal delta, earliest on ties).
@@ -165,15 +165,15 @@ An interactive console session with the same data pipeline, no web server requir
 cargo run -- cli
 ```
 
-| Command                              | Description                                          |
-| ------------------------------------ | ---------------------------------------------------- |
-| `upload <path>`                      | Import a Monefy CSV or Euroopt receipt PDF           |
-| `stats`                              | Overview: summary + category breakdown               |
-| `stats summary / category / account` | Single view                                          |
-| `stats timeline [day\|week]`         | Spending over time                                   |
+| Command                              | Description                                               |
+| ------------------------------------ | --------------------------------------------------------- |
+| `upload <path>`                      | Import a Monefy CSV or Euroopt receipt PDF                |
+| `stats`                              | Overview: summary + category breakdown                    |
+| `stats summary / category / account` | Single view                                               |
+| `stats timeline [day\|week]`         | Spending over time                                        |
 | `receipts`                           | Show pending receipts (waiting for a matching CSV import) |
-| `from <date>` / `to <date>`          | Optional date filters (YYYY-MM-DD)                   |
-| `help` / `exit`                      | Usage / quit                                         |
+| `from <date>` / `to <date>`          | Optional date filters (YYYY-MM-DD)                        |
+| `help` / `exit`                      | Usage / quit                                              |
 
 Data persists in the SQLite database across runs: the CLI loads `.env` and requires `DATABASE_URL` exactly like the server; no HTTP listener is started.
 
