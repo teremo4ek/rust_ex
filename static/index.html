@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%234f46e5'/%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: light-dark(#f5f6f8, #14161a); color: light-dark(#1f2430, #e6e8ec);
+  }
+  main { max-width: 32rem; padding: 2.5rem 2rem; text-align: center; }
+  h1 { font-size: 1.75rem; margin: 0 0 .25rem; }
+  .status { color: #16a34a; font-weight: 600; margin: 1rem 0; }
+  .status::before { content: "✔ "; }
+  .note { opacity: .8; margin: 0 0 1.5rem; }
+  ul { list-style: none; margin: 0; padding: 0; font-family: ui-monospace, monospace; font-size: .9rem; }
+  li { margin: .4rem 0; }
+  a { color: #4f46e5; }
+  @media (prefers-color-scheme: dark) { a { color: #8b8cf8; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Expense Tracker</h1>
+  <p class="status">API is running</p>
+  <p class="note">Web UI is under construction</p>
+  <ul>
+    <li><a href="/health">/health</a></li>
+    <li>REST API: <a href="/api/expenses">/api/expenses</a> (auth required)</li>
+  </ul>
+</main>
+</body>
+</html>

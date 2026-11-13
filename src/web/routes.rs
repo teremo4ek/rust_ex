@@ -1,3 +1,4 @@
+use axum::response::Html;
 use axum::routing::{delete, get, post};
 use axum::Router;
 use tower_http::cors::CorsLayer;
@@ -5,6 +6,8 @@ use tower_http::trace::TraceLayer;
 
 use crate::common::state::AppState;
 use crate::web::handlers;
+
+const INDEX_HTML: &str = include_str!("../../static/index.html");
 
 pub fn create_router(state: AppState) -> Router {
     let protected_routes = Router::new()
@@ -23,6 +26,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/analytics/timeline", get(handlers::analytics::timeline));
 
     Router::new()
+        .route("/", get(|| async { Html(INDEX_HTML) }))
         .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/auth/login", post(handlers::auth::login))
         .merge(protected_routes)
