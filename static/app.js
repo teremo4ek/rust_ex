@@ -69,17 +69,24 @@ function logout() {
 
 function enterApp() {
   $("#user-email").textContent = state.email;
-  setDefaultMonth();
+  setMonthRange(0);
   show("app");
   refresh();
 }
 
-function setDefaultMonth() {
-  const now = new Date();
-  const fmt = (d) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  $("#from").value = fmt(new Date(now.getFullYear(), now.getMonth(), 1));
-  $("#to").value = fmt(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+function fmtDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function setMonthRange(offset) {
+  const from = $("#from").value;
+  const base = from
+    ? new Date(Number(from.slice(0, 4)), Number(from.slice(5, 7)) - 1, 1)
+    : new Date();
+  const first = new Date(base.getFullYear(), base.getMonth() + offset, 1);
+  const last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
+  $("#from").value = fmtDate(first);
+  $("#to").value = fmtDate(last);
 }
 
 function filterParams() {
@@ -189,6 +196,15 @@ $("#filters").addEventListener("submit", (event) => {
   state.page = 1;
   refresh();
 });
+
+function shiftMonth(offset) {
+  setMonthRange(offset);
+  state.page = 1;
+  refresh();
+}
+
+$("#prev-month").addEventListener("click", () => shiftMonth(-1));
+$("#next-month").addEventListener("click", () => shiftMonth(1));
 
 $("#upload-form").addEventListener("change", async (event) => {
   const file = event.target.files[0];
