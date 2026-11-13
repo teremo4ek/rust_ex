@@ -281,6 +281,10 @@ $("#modal-close").addEventListener("click", () => {
   $("#details-modal").close();
 });
 
+$("#modal-ok").addEventListener("click", () => {
+  $("#details-modal").close();
+});
+
 $("#details-modal").addEventListener("close", resetModal);
 
 $("#edit-expense").addEventListener("click", () => {
