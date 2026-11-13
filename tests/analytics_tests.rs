@@ -69,6 +69,35 @@ async fn test_summary() {
 }
 
 #[tokio::test]
+async fn test_summary_with_description_filter() {
+    let (app, token, _) = setup_with_expenses().await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/api/analytics/summary?description=subSCRIPTION")
+                .header("authorization", common::auth_header(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["total_income"].as_str().unwrap(), "0");
+    assert_eq!(body["total_expense"].as_str().unwrap(), "3.54");
+    assert_eq!(body["net"].as_str().unwrap(), "-3.54");
+}
+
+#[tokio::test]
 async fn test_by_category() {
     let (app, token, _) = setup_with_expenses().await;
 

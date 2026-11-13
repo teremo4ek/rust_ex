@@ -334,6 +334,36 @@ fn push_filters<'a>(
     }
 }
 
+fn search_needle(description: Option<&str>) -> Option<String> {
+    description
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(str::to_lowercase)
+}
+
+fn description_matches(description: &str, needle: &str) -> bool {
+    description.to_lowercase().contains(needle)
+}
+
+async fn fetch_all_expenses(
+    state: &AppState,
+    user_id: Uuid,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    category: Option<&str>,
+    account: Option<&str>,
+) -> AppResult<Vec<Expense>> {
+    let mut qb = sqlx::QueryBuilder::new(format!(
+        "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE user_id = "
+    ));
+    qb.push_bind(user_id.to_string());
+    push_filters(&mut qb, from, to, category, account);
+    qb.push(" ORDER BY date DESC, rowid DESC");
+
+    let rows: Vec<ExpenseRow> = qb.build_query_as().fetch_all(&state.pool).await?;
+    rows.into_iter().map(ExpenseRow::into_expense).collect()
+}
+
 pub async fn list_expenses(
     state: &AppState,
     user_id: Uuid,
@@ -341,8 +371,27 @@ pub async fn list_expenses(
 ) -> AppResult<Vec<Expense>> {
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(50).min(100);
-    let offset = (page - 1) as i64 * per_page as i64;
 
+    if let Some(needle) = search_needle(query.description.as_deref()) {
+        let offset = (page - 1) as usize * per_page as usize;
+        let all = fetch_all_expenses(
+            state,
+            user_id,
+            query.from,
+            query.to,
+            query.category.as_deref(),
+            query.account.as_deref(),
+        )
+        .await?;
+        return Ok(all
+            .into_iter()
+            .filter(|e| description_matches(&e.description, &needle))
+            .skip(offset)
+            .take(per_page as usize)
+            .collect());
+    }
+
+    let offset = (page - 1) as i64 * per_page as i64;
     let mut qb = sqlx::QueryBuilder::new(format!(
         "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE user_id = "
     ));
@@ -368,6 +417,22 @@ pub async fn count_expenses(
     user_id: Uuid,
     query: &ExpensesQuery,
 ) -> AppResult<usize> {
+    if let Some(needle) = search_needle(query.description.as_deref()) {
+        let all = fetch_all_expenses(
+            state,
+            user_id,
+            query.from,
+            query.to,
+            query.category.as_deref(),
+            query.account.as_deref(),
+        )
+        .await?;
+        return Ok(all
+            .iter()
+            .filter(|e| description_matches(&e.description, &needle))
+            .count());
+    }
+
     let mut qb = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM expenses WHERE user_id = ");
     qb.push_bind(user_id.to_string());
     push_filters(
@@ -454,6 +519,7 @@ pub async fn get_user_expenses(
     user_id: Uuid,
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
+    description: Option<&str>,
 ) -> AppResult<Vec<Expense>> {
     let mut qb = sqlx::QueryBuilder::new(format!(
         "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE user_id = "
@@ -463,7 +529,14 @@ pub async fn get_user_expenses(
     qb.push(" ORDER BY rowid");
 
     let rows: Vec<ExpenseRow> = qb.build_query_as().fetch_all(&state.pool).await?;
-    rows.into_iter().map(ExpenseRow::into_expense).collect()
+    let mut expenses: Vec<Expense> = rows
+        .into_iter()
+        .map(ExpenseRow::into_expense)
+        .collect::<AppResult<Vec<_>>>()?;
+    if let Some(needle) = search_needle(description) {
+        expenses.retain(|e| description_matches(&e.description, &needle));
+    }
+    Ok(expenses)
 }
 
 #[cfg(test)]
@@ -565,6 +638,7 @@ date,account,category,amount,currency,converted amount,currency,description
             to: None,
             category: None,
             account: None,
+            description: None,
             page: None,
             per_page: None,
         }
@@ -588,6 +662,41 @@ date,account,category,amount,currency,converted amount,currency,description
         );
         let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
         assert!(expenses.iter().all(|e| e.amount_usd.is_none()));
+    }
+
+    #[tokio::test]
+    async fn test_description_filter_cyrillic_case_insensitive() {
+        let (state, user_id) = registered_state().await;
+        import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        let mut query = empty_query();
+        query.description = Some("сухофрукты".into());
+        assert_eq!(
+            count_expenses(&state, user_id, &query).await.unwrap(),
+            1
+        );
+        let expenses = list_expenses(&state, user_id, &query).await.unwrap();
+        assert_eq!(expenses.len(), 1);
+        assert_eq!(expenses[0].description, "Сухофрукты");
+    }
+
+    #[tokio::test]
+    async fn test_description_filter_paginates_in_rust() {
+        let (state, user_id) = registered_state().await;
+        let seed = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,Food,-10,BYN,-10,BYN,Coffee shop
+4/21/2026,Cash,Food,-5,BYN,-5,BYN,Metro
+4/20/2026,Cash,Food,-7,BYN,-7,BYN,coffee to go
+";
+        import_csv(&state, user_id, seed).await.unwrap();
+        let mut query = empty_query();
+        query.description = Some("COFFEE".into());
+        query.page = Some(2);
+        query.per_page = Some(1);
+        assert_eq!(count_expenses(&state, user_id, &query).await.unwrap(), 2);
+        let expenses = list_expenses(&state, user_id, &query).await.unwrap();
+        assert_eq!(expenses.len(), 1);
+        assert!(expenses[0].description.to_lowercase().contains("coffee"));
     }
 
     #[tokio::test]

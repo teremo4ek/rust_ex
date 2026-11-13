@@ -1122,6 +1122,7 @@ date,account,category,amount,currency,converted amount,currency,description
             to: None,
             category: None,
             account: None,
+            description: None,
             page: None,
             per_page: None,
         }

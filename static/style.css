@@ -32,7 +32,7 @@ input, select, textarea {
   background: light-dark(#f5f6f8, #14161a);
   border: 1px solid light-dark(#d7dae1, #333844); border-radius: 8px;
 }
-input[type="date"] { width: auto; }
+input[type="date"], input[type="search"] { width: auto; }
 textarea { resize: vertical; }
 
 .btn {
@@ -83,6 +83,7 @@ table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nu
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid light-dark(#eceef2, #2a2e36); white-space: nowrap; }
 th { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; opacity: .6; }
 td.desc { white-space: normal; min-width: 12rem; }
+mark { background: light-dark(#fef08a, rgba(139, 140, 248, 0.35)); color: inherit; border-radius: 3px; padding: 0 .1em; }
 .num { text-align: right; }
 .row-details { padding: .2rem .55rem; font-size: .8rem; }
 

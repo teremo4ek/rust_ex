@@ -263,6 +263,36 @@ async fn test_list_expenses_newest_first() {
 }
 
 #[tokio::test]
+async fn test_list_expenses_description_filter() {
+    let app = common::create_test_app().await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+    upload_fixture(&app, &token).await;
+
+    let (status, body) = get_json(&app, &token, "/api/expenses?description=grocery%20store").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["total"].as_u64().unwrap(), 10);
+    let expenses = body["expenses"].as_array().unwrap();
+    assert!(expenses
+        .iter()
+        .all(|e| e["description"].as_str().unwrap() == "Grocery store"));
+
+    let (status, page2) = get_json(
+        &app,
+        &token,
+        "/api/expenses?description=grocery%20store&page=2&per_page=3",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page2["page"].as_u64().unwrap(), 2);
+    assert_eq!(page2["total"].as_u64().unwrap(), 10);
+    let page2_rows = page2["expenses"].as_array().unwrap();
+    assert_eq!(page2_rows.len(), 3);
+    assert!(page2_rows
+        .iter()
+        .all(|e| e["description"].as_str().unwrap() == "Grocery store"));
+}
+
+#[tokio::test]
 async fn test_upload_without_auth() {
     let app = common::create_test_app().await;
 

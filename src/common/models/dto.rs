@@ -46,6 +46,7 @@ pub struct ExpensesQuery {
     pub to: Option<NaiveDate>,
     pub category: Option<String>,
     pub account: Option<String>,
+    pub description: Option<String>,
     pub page: Option<u32>,
     pub per_page: Option<u32>,
 }
@@ -93,6 +94,7 @@ pub struct ExpensesResponse {
 pub struct AnalyticsQuery {
     pub from: Option<NaiveDate>,
     pub to: Option<NaiveDate>,
+    pub description: Option<String>,
     pub group_by: Option<String>,
 }
 

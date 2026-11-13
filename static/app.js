@@ -95,11 +95,34 @@ function filterParams() {
   const to = $("#to").value;
   if (from) params.set("from", from);
   if (to) params.set("to", to);
+  const q = $("#search").value.trim();
+  if (q) params.set("description", q);
   return params;
 }
 
 const usd = (value) =>
   String(value).startsWith("-") ? `-$${String(value).slice(1)}` : `$${value}`;
+
+function highlightDesc(text) {
+  const q = $("#search").value.trim().toLowerCase();
+  if (!q) return esc(text);
+  const hay = text.toLowerCase();
+  if (hay.length !== text.length) return esc(text);
+  let out = "";
+  let i = 0;
+  for (;;) {
+    let at = hay.indexOf(q, i);
+    if (at === -1) {
+      out += esc(text.slice(i));
+      break;
+    }
+    let end = at + q.length;
+    while (hay.startsWith(q, end)) end += q.length;
+    out += esc(text.slice(i, at)) + "<mark>" + esc(text.slice(at, end)) + "</mark>";
+    i = end;
+  }
+  return out;
+}
 
 async function loadSummary() {
   const params = filterParams();
@@ -134,7 +157,7 @@ async function loadExpenses() {
         <td>${esc(e.date)}</td>
         <td>${esc(e.account.replaceAll("_", " "))}</td>
         <td>${esc(e.category)}</td>
-        <td class="desc">${esc(e.description)}</td>
+        <td class="desc">${highlightDesc(e.description)}</td>
         <td class="num ${e.kind === "income" ? "pos" : "neg"}">${esc(e.amount)} ${esc(e.currency)}</td>
         <td class="num">${e.amount_usd == null ? "–" : `$${esc(e.amount_usd)}`}</td>
         <td><button type="button" class="btn ghost row-details" data-id="${e.id}">Details</button></td>
@@ -147,6 +170,11 @@ async function loadExpenses() {
   $("#prev").disabled = state.page <= 1;
   $("#next").disabled = state.page >= pages;
   $("#empty-hint").hidden = data.expenses.length !== 0;
+  if (data.expenses.length === 0) {
+    $("#empty-hint").textContent = $("#search").value.trim()
+      ? "No transactions match your search"
+      : "No transactions in the selected period";
+  }
 }
 
 async function refresh() {
