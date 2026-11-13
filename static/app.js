@@ -69,8 +69,17 @@ function logout() {
 
 function enterApp() {
   $("#user-email").textContent = state.email;
+  setDefaultMonth();
   show("app");
   refresh();
+}
+
+function setDefaultMonth() {
+  const now = new Date();
+  const fmt = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  $("#from").value = fmt(new Date(now.getFullYear(), now.getMonth(), 1));
+  $("#to").value = fmt(new Date(now.getFullYear(), now.getMonth() + 1, 0));
 }
 
 function filterParams() {
@@ -82,15 +91,18 @@ function filterParams() {
   return params;
 }
 
+const usd = (value) =>
+  String(value).startsWith("-") ? `-$${String(value).slice(1)}` : `$${value}`;
+
 async function loadSummary() {
   const params = filterParams();
   const query = params.toString();
   const data = await api(`/api/analytics/summary${query ? `?${query}` : ""}`);
-  $("#sum-income").textContent = data.total_income;
-  $("#sum-expense").textContent = data.total_expense;
+  $("#sum-income").textContent = usd(data.total_income);
+  $("#sum-expense").textContent = usd(data.total_expense);
   const net = Number(data.net);
   const netEl = $("#sum-net");
-  netEl.textContent = data.net;
+  netEl.textContent = usd(data.net);
   netEl.classList.toggle("neg", net < 0);
   netEl.classList.toggle("pos", net >= 0);
 }
@@ -127,6 +139,7 @@ async function loadExpenses() {
   $("#page-info").textContent = `Page ${state.page} of ${pages}`;
   $("#prev").disabled = state.page <= 1;
   $("#next").disabled = state.page >= pages;
+  $("#empty-hint").hidden = data.expenses.length !== 0;
 }
 
 async function refresh() {

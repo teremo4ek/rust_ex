@@ -88,6 +88,7 @@ td.desc { white-space: normal; min-width: 12rem; }
 
 .pager { display: flex; align-items: center; justify-content: center; gap: 1rem; }
 #page-info { font-size: .9rem; opacity: .75; }
+.empty-hint { text-align: center; opacity: .6; margin: 0; }
 
 .modal {
   width: min(36rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow-y: auto;

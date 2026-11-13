@@ -3,6 +3,7 @@ use axum::Json;
 
 use crate::common::error::AppResult;
 use crate::common::models::dto::AnalyticsQuery;
+use crate::common::services::usd_conversion;
 use crate::common::services::{analytics_service, expense_service};
 use crate::common::state::AppState;
 use crate::web::middleware::auth::AuthUser;
@@ -12,9 +13,10 @@ pub async fn summary(
     auth: AuthUser,
     Query(query): Query<AnalyticsQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
+    usd_conversion::convert_to_usd(&state, auth.id).await.ok();
     let expenses =
         expense_service::get_user_expenses(&state, auth.id, query.from, query.to).await?;
-    Ok(Json(serde_json::to_value(analytics_service::summary(&expenses)).unwrap()))
+    Ok(Json(serde_json::to_value(analytics_service::summary_usd(&expenses)).unwrap()))
 }
 
 pub async fn by_category(

@@ -63,9 +63,9 @@ async fn test_summary() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(body["total_income"].as_str().unwrap(), "793");
-    assert_eq!(body["total_expense"].as_str().unwrap(), "559.17");
-    assert_eq!(body["net"].as_str().unwrap(), "233.83");
+    assert_eq!(body["total_income"].as_str().unwrap(), "280.90");
+    assert_eq!(body["total_expense"].as_str().unwrap(), "199.47");
+    assert_eq!(body["net"].as_str().unwrap(), "81.43");
 }
 
 #[tokio::test]

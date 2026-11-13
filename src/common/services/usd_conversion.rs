@@ -237,11 +237,11 @@ date,account,category,amount,currency,converted amount,currency,description
         let expenses = expenses(&state, user_id).await;
         assert_eq!(
             expenses[0].amount_usd,
-            Some((dec!(17.26) / dec!(2.8230)).round_dp(2))
+            Some((dec!(15.31) / dec!(2.8230)).round_dp(2))
         );
         assert_eq!(
             expenses[1].amount_usd,
-            Some((dec!(15.31) / dec!(2.8230)).round_dp(2))
+            Some((dec!(17.26) / dec!(2.8230)).round_dp(2))
         );
     }
 
@@ -338,11 +338,11 @@ date,account,category,amount,currency,converted amount,currency,description
         let report = convert(&state, user_id, fetcher).await.unwrap();
         assert_eq!(report, ConversionReport { converted: 1, skipped: 1 });
         let expenses = expenses(&state, user_id).await;
-        assert_eq!(expenses[0].amount_usd, None);
         assert_eq!(
-            expenses[1].amount_usd,
+            expenses[0].amount_usd,
             Some((dec!(15.31) / dec!(2.8230)).round_dp(2))
         );
+        assert_eq!(expenses[1].amount_usd, None);
         let cached = cached_rate(&state, bad_date).await.unwrap();
         assert_eq!(cached, None);
     }

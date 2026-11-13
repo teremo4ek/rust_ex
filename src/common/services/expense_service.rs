@@ -354,7 +354,7 @@ pub async fn list_expenses(
         query.category.as_deref(),
         query.account.as_deref(),
     );
-    qb.push(" ORDER BY rowid LIMIT ")
+    qb.push(" ORDER BY date DESC, rowid DESC LIMIT ")
         .push_bind(per_page as i64)
         .push(" OFFSET ")
         .push_bind(offset);

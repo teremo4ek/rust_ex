@@ -221,7 +221,8 @@ async fn test_upload_csv_twice_second_is_all_duplicates() {
     .unwrap();
     assert_eq!(body["total"].as_u64().unwrap(), 41);
     assert_eq!(body["expenses"].as_array().unwrap().len(), 41);
-    assert_eq!(body["expenses"][0]["amount"].as_str().unwrap(), "17.26");
+    assert_eq!(body["expenses"][0]["amount"].as_str().unwrap(), "21.08");
+    assert_eq!(body["expenses"][0]["account"].as_str().unwrap(), "payment_card");
     assert_eq!(body["expenses"][0]["kind"].as_str().unwrap(), "expense");
     assert!(
         body["expenses"]
@@ -236,6 +237,28 @@ async fn test_upload_csv_twice_second_is_all_duplicates() {
             .unwrap()
             .iter()
             .all(|e| matches!(e["kind"].as_str(), Some("expense") | Some("income")))
+    );
+}
+
+#[tokio::test]
+async fn test_list_expenses_newest_first() {
+    let app = common::create_test_app().await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+    upload_fixture(&app, &token).await;
+
+    let (_, body) = get_json(&app, &token, "/api/expenses").await;
+
+    let expenses = body["expenses"].as_array().unwrap();
+    assert_eq!(expenses[0]["date"].as_str().unwrap(), "2026-05-04");
+    assert_eq!(expenses[0]["amount"].as_str().unwrap(), "21.08");
+    let dates: Vec<&str> = expenses
+        .iter()
+        .map(|e| e["date"].as_str().unwrap())
+        .collect();
+    assert!(
+        dates.windows(2).all(|w| w[0] >= w[1]),
+        "dates must be non-increasing, got {:?}",
+        dates
     );
 }
 
