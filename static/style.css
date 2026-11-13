@@ -106,9 +106,11 @@ td.desc { white-space: normal; min-width: 12rem; }
 .detail-grid dt { opacity: .6; }
 .detail-grid dd { margin: 0; font-variant-numeric: tabular-nums; }
 
+#receipt-block { max-height: min(24rem, 45vh); overflow-y: auto; overscroll-behavior: contain; }
 #receipt-block table { width: 100%; font-size: .85rem; }
 #receipt-block th { white-space: nowrap; }
-.receipt-total { margin: 0 0 .4rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+#receipt-block td:not(.num) { white-space: normal; overflow-wrap: anywhere; }
+.receipt-total { margin: 0 0 .4rem; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .disc { color: #dc2626; font-size: .8rem; }
 
 .edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .9rem; align-items: end; }
