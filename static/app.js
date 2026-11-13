@@ -1,0 +1,213 @@
+const $ = (sel) => document.querySelector(sel);
+
+const state = {
+  token: localStorage.getItem("token"),
+  email: localStorage.getItem("email"),
+  page: 1,
+  perPage: 50,
+  total: 0,
+  mode: "login",
+};
+
+const esc = (s) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+async function api(path, opts = {}) {
+  const headers = { ...opts.headers };
+  if (!(opts.body instanceof FormData) && opts.body) headers["Content-Type"] = "application/json";
+  if (state.token) headers["Authorization"] = `Bearer ${state.token}`;
+  const res = await fetch(path, { ...opts, headers });
+  if (res.status === 401) {
+    logout();
+    throw new Error("Session expired, please sign in again");
+  }
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data.error) message = data.error;
+    } catch {}
+    throw new Error(message);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+function showMessage(text, isError = false) {
+  const el = $("#message");
+  el.textContent = text;
+  el.classList.toggle("error", isError);
+  el.hidden = false;
+}
+
+function clearMessage() {
+  $("#message").hidden = true;
+}
+
+function show(view) {
+  $("#auth").hidden = view !== "auth";
+  $("#app").hidden = view !== "app";
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  $("#tab-login").classList.toggle("active", mode === "login");
+  $("#tab-register").classList.toggle("active", mode === "register");
+  $("#auth-submit").textContent = mode === "login" ? "Sign in" : "Register";
+  $("#password").autocomplete = mode === "login" ? "current-password" : "new-password";
+}
+
+function logout() {
+  state.token = null;
+  state.email = null;
+  localStorage.removeItem("token");
+  localStorage.removeItem("email");
+  show("auth");
+}
+
+function enterApp() {
+  $("#user-email").textContent = state.email;
+  show("app");
+  refresh();
+}
+
+function filterParams() {
+  const params = new URLSearchParams();
+  const from = $("#from").value;
+  const to = $("#to").value;
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  return params;
+}
+
+async function loadSummary() {
+  const params = filterParams();
+  const query = params.toString();
+  const data = await api(`/api/analytics/summary${query ? `?${query}` : ""}`);
+  $("#sum-income").textContent = data.total_income;
+  $("#sum-expense").textContent = data.total_expense;
+  const net = Number(data.net);
+  const netEl = $("#sum-net");
+  netEl.textContent = data.net;
+  netEl.classList.toggle("neg", net < 0);
+  netEl.classList.toggle("pos", net >= 0);
+}
+
+async function loadExpenses() {
+  const params = filterParams();
+  params.set("page", state.page);
+  params.set("per_page", state.perPage);
+  const data = await api(`/api/expenses?${params}`);
+  state.total = data.total;
+  state.page = data.page;
+
+  $("#rows").innerHTML = data.expenses
+    .map(
+      (e) => `<tr>
+        <td>${esc(e.date)}</td>
+        <td>${esc(e.account.replaceAll("_", " "))}</td>
+        <td>${esc(e.category)}</td>
+        <td class="desc">${esc(e.description)}</td>
+        <td class="num ${e.kind === "income" ? "pos" : "neg"}">${esc(e.amount)} ${esc(e.currency)}</td>
+        <td class="num">${e.amount_usd == null ? "–" : `$${esc(e.amount_usd)}`}</td>
+        <td><button type="button" class="btn ghost row-del" data-id="${e.id}">✕</button></td>
+      </tr>`
+    )
+    .join("");
+
+  const pages = Math.max(1, Math.ceil(state.total / state.perPage));
+  $("#page-info").textContent = `Page ${state.page} of ${pages}`;
+  $("#prev").disabled = state.page <= 1;
+  $("#next").disabled = state.page >= pages;
+}
+
+async function refresh() {
+  clearMessage();
+  try {
+    await Promise.all([loadSummary(), loadExpenses()]);
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+}
+
+function uploadReport(data) {
+  if ("imported" in data) {
+    return `CSV import: ${data.imported} new, ${data.duplicates} duplicates, ${data.receipts_attached} receipts attached, ${data.converted} USD-converted`;
+  }
+  const attached = data.expense_id ? "attached to an expense" : "pending (no matching expense yet)";
+  return `Receipt ${data.status}: ${data.total} ${data.currency} on ${data.date}, ${data.item_count} items — ${attached}`;
+}
+
+$("#tab-login").addEventListener("click", () => setMode("login"));
+$("#tab-register").addEventListener("click", () => setMode("register"));
+
+$("#auth-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const body = JSON.stringify({
+    email: $("#email").value.trim(),
+    password: $("#password").value,
+  });
+  const path = state.mode === "login" ? "/api/auth/login" : "/api/auth/register";
+  try {
+    const data = await api(path, { method: "POST", body });
+    state.token = data.token;
+    state.email = data.user.email;
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("email", data.user.email);
+    state.page = 1;
+    enterApp();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+$("#logout").addEventListener("click", logout);
+
+$("#filters").addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.page = 1;
+  refresh();
+});
+
+$("#upload-form").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  const body = new FormData();
+  body.append("file", file);
+  try {
+    const data = await api("/api/expenses/upload", { method: "POST", body });
+    showMessage(uploadReport(data));
+    await Promise.all([loadSummary(), loadExpenses()]);
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+});
+
+$("#rows").addEventListener("click", async (event) => {
+  const btn = event.target.closest(".row-del");
+  if (!btn) return;
+  if (!confirm("Delete this expense?")) return;
+  try {
+    await api(`/api/expenses/${btn.dataset.id}`, { method: "DELETE" });
+    await Promise.all([loadSummary(), loadExpenses()]);
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+});
+
+$("#prev").addEventListener("click", () => {
+  state.page -= 1;
+  refresh();
+});
+
+$("#next").addEventListener("click", () => {
+  state.page += 1;
+  refresh();
+});
+
+if (state.token) {
+  enterApp();
+} else {
+  show("auth");
+}

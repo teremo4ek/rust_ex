@@ -233,3 +233,31 @@ async fn test_root_serves_landing_page() {
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains("Expense Tracker"));
 }
+
+#[tokio::test]
+async fn test_static_assets() {
+    let app = common::create_test_app().await;
+
+    for (uri, prefix) in [("/app.js", "text/javascript"), ("/style.css", "text/css")] {
+        let res = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .expect("content-type header")
+            .to_str()
+            .unwrap()
+            .starts_with(prefix));
+    }
+}
