@@ -1,6 +1,6 @@
 use axum::http::header;
 use axum::response::Html;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -17,6 +17,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/expenses/upload", post(handlers::expenses::upload))
         .route("/api/expenses", get(handlers::expenses::list))
         .route("/api/expenses/{id}", delete(handlers::expenses::delete))
+        .route("/api/expenses/{id}", put(handlers::expenses::update))
         .route(
             "/api/expenses/{id}/receipt",
             get(handlers::expenses::expense_receipt),

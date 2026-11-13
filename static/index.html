@@ -78,6 +78,46 @@
   </main>
 </section>
 
+<dialog id="details-modal" class="modal">
+    <div id="detail-view">
+      <div class="modal-head">
+        <h2>Transaction details</h2>
+        <button type="button" id="modal-close" class="btn ghost">✕</button>
+      </div>
+      <dl id="detail-fields" class="detail-grid"></dl>
+      <h3>Receipt</h3>
+      <div id="receipt-block"></div>
+      <div class="modal-actions">
+        <button type="button" id="delete-expense" class="btn danger">Delete</button>
+        <button type="button" id="edit-expense" class="btn primary">Edit</button>
+      </div>
+    </div>
+    <form id="edit-form" class="edit-grid" hidden>
+      <label>Date <input type="date" id="edit-date" required></label>
+      <label>Account
+        <select id="edit-account">
+          <option value="cash">Cash</option>
+          <option value="payment_card">Payment card</option>
+        </select>
+      </label>
+      <label>Category <input type="text" id="edit-category" required></label>
+      <label>Kind
+        <select id="edit-kind">
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+        </select>
+      </label>
+      <label>Amount <input type="text" id="edit-amount" inputmode="decimal" required></label>
+      <label>Currency <input type="text" id="edit-currency" maxlength="8" required></label>
+      <label class="span2">Description <textarea id="edit-description" rows="2"></textarea></label>
+      <div id="edit-error" class="message error" hidden></div>
+      <div class="modal-actions span2">
+        <button type="button" id="edit-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
 <script src="/app.js"></script>
 </body>
 </html>

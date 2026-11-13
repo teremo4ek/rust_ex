@@ -7,12 +7,12 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
-use crate::common::models::dto::ExpensesQuery;
+use crate::common::models::dto::{ExpensesQuery, UpdateExpenseRequest};
 use crate::common::models::receipt::ReceiptReport;
 use crate::common::models::{Account, Expense, TransactionKind};
 use crate::common::state::AppState;
 
-use super::usd_conversion::ConversionReport;
+use super::usd_conversion::{convert_to_usd, ConversionReport};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ImportReport {
@@ -393,6 +393,60 @@ pub async fn delete_expense(state: &AppState, user_id: Uuid, expense_id: Uuid) -
         return Err(AppError::NotFound("expense not found".into()));
     }
     Ok(())
+}
+
+pub async fn get_expense(
+    state: &AppState,
+    user_id: Uuid,
+    expense_id: Uuid,
+) -> AppResult<Expense> {
+    let row: Option<ExpenseRow> = sqlx::query_as(&format!(
+        "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE id = ? AND user_id = ?"
+    ))
+    .bind(expense_id.to_string())
+    .bind(user_id.to_string())
+    .fetch_optional(&state.pool)
+    .await?;
+
+    row.map(ExpenseRow::into_expense)
+        .transpose()?
+        .ok_or_else(|| AppError::NotFound("expense not found".into()))
+}
+
+pub async fn update_expense(
+    state: &AppState,
+    user_id: Uuid,
+    expense_id: Uuid,
+    req: UpdateExpenseRequest,
+) -> AppResult<Expense> {
+    if req.amount <= Decimal::ZERO {
+        return Err(AppError::BadRequest("amount must be positive".into()));
+    }
+
+    let result = sqlx::query(
+        "UPDATE expenses
+         SET date = ?, account = ?, category = ?, amount = ?, kind = ?, currency = ?,
+             description = ?, amount_usd = NULL
+         WHERE id = ? AND user_id = ?",
+    )
+    .bind(req.date)
+    .bind(req.account.to_string())
+    .bind(req.category)
+    .bind(req.amount.to_string())
+    .bind(req.kind.to_string())
+    .bind(req.currency)
+    .bind(req.description)
+    .bind(expense_id.to_string())
+    .bind(user_id.to_string())
+    .execute(&state.pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("expense not found".into()));
+    }
+
+    let _ = convert_to_usd(state, user_id).await;
+    get_expense(state, user_id, expense_id).await
 }
 
 pub async fn get_user_expenses(

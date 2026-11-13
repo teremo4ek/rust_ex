@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-use super::{PublicUser, Expense, Receipt, ReceiptStatus};
+use super::{PublicUser, Account, Expense, Receipt, ReceiptStatus, TransactionKind};
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct RegisterRequest {
@@ -25,6 +25,19 @@ pub struct LoginRequest {
 pub struct LoginResponse {
     pub token: String,
     pub user: PublicUser,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateExpenseRequest {
+    pub date: NaiveDate,
+    pub account: Account,
+    #[validate(length(min = 1, message = "category must not be empty"))]
+    pub category: String,
+    pub amount: Decimal,
+    pub kind: TransactionKind,
+    #[validate(length(min = 1, message = "currency must not be empty"))]
+    pub currency: String,
+    pub description: String,
 }
 
 #[derive(Debug, Deserialize)]

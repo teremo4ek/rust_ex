@@ -7,6 +7,8 @@ const state = {
   perPage: 50,
   total: 0,
   mode: "login",
+  expenses: [],
+  currentExpense: null,
 };
 
 const esc = (s) =>
@@ -100,6 +102,12 @@ async function loadExpenses() {
   const data = await api(`/api/expenses?${params}`);
   state.total = data.total;
   state.page = data.page;
+  state.expenses = data.expenses;
+
+  if (state.total > 0 && data.expenses.length === 0 && state.page > 1) {
+    state.page -= 1;
+    return loadExpenses();
+  }
 
   $("#rows").innerHTML = data.expenses
     .map(
@@ -110,7 +118,7 @@ async function loadExpenses() {
         <td class="desc">${esc(e.description)}</td>
         <td class="num ${e.kind === "income" ? "pos" : "neg"}">${esc(e.amount)} ${esc(e.currency)}</td>
         <td class="num">${e.amount_usd == null ? "–" : `$${esc(e.amount_usd)}`}</td>
-        <td><button type="button" class="btn ghost row-del" data-id="${e.id}">✕</button></td>
+        <td><button type="button" class="btn ghost row-details" data-id="${e.id}">Details</button></td>
       </tr>`
     )
     .join("");
@@ -184,16 +192,9 @@ $("#upload-form").addEventListener("change", async (event) => {
   }
 });
 
-$("#rows").addEventListener("click", async (event) => {
-  const btn = event.target.closest(".row-del");
-  if (!btn) return;
-  if (!confirm("Delete this expense?")) return;
-  try {
-    await api(`/api/expenses/${btn.dataset.id}`, { method: "DELETE" });
-    await Promise.all([loadSummary(), loadExpenses()]);
-  } catch (err) {
-    showMessage(err.message, true);
-  }
+$("#rows").addEventListener("click", (event) => {
+  const btn = event.target.closest(".row-details");
+  if (btn) openDetails(btn.dataset.id);
 });
 
 $("#prev").addEventListener("click", () => {
@@ -204,6 +205,128 @@ $("#prev").addEventListener("click", () => {
 $("#next").addEventListener("click", () => {
   state.page += 1;
   refresh();
+});
+
+function openDetails(id) {
+  const expense = state.expenses.find((e) => e.id === id);
+  if (!expense) return;
+  resetModal();
+  state.currentExpense = expense;
+  renderDetail(expense);
+  $("#details-modal").showModal();
+  fetchReceipt(id);
+}
+
+function renderDetail(e) {
+  const rows = [
+    ["Date", esc(e.date)],
+    ["Account", esc(e.account.replaceAll("_", " "))],
+    ["Category", esc(e.category)],
+    ["Kind", esc(e.kind)],
+    ["Amount", `${esc(e.amount)} ${esc(e.currency)}`],
+    ["USD", e.amount_usd == null ? "–" : `$${esc(e.amount_usd)}`],
+    ["Description", esc(e.description)],
+  ];
+  $("#detail-fields").innerHTML = rows
+    .map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`)
+    .join("");
+}
+
+async function fetchReceipt(id) {
+  $("#receipt-block").textContent = "Loading receipt…";
+  try {
+    renderReceipt(await api(`/api/expenses/${id}/receipt`));
+  } catch {
+    $("#receipt-block").textContent = "No receipt attached";
+  }
+}
+
+function renderReceipt(receipt) {
+  const items = receipt.items
+    .map(
+      (item) => `<tr>
+        <td>${esc(item.position)}</td>
+        <td>${esc(item.name)}${Number(item.discount) !== 0 ? ` <span class="disc">−${esc(item.discount)}</span>` : ""}</td>
+        <td class="num">${esc(item.quantity)} × ${esc(item.unit_price)}</td>
+        <td class="num">${esc(item.total)}</td>
+      </tr>`
+    )
+    .join("");
+  $("#receipt-block").innerHTML = `
+    <p class="receipt-total">${esc(receipt.total)} ${esc(receipt.currency)} — ${esc(receipt.fiscal_id)}</p>
+    <table>
+      <thead><tr><th>#</th><th>Item</th><th class="num">Qty × Price</th><th class="num">Total</th></tr></thead>
+      <tbody>${items}</tbody>
+    </table>`;
+}
+
+function prefillEdit(e) {
+  $("#edit-date").value = e.date;
+  $("#edit-account").value = e.account;
+  $("#edit-kind").value = e.kind;
+  $("#edit-category").value = e.category;
+  $("#edit-amount").value = e.amount;
+  $("#edit-currency").value = e.currency;
+  $("#edit-description").value = e.description;
+}
+
+function resetModal() {
+  state.currentExpense = null;
+  $("#detail-view").hidden = false;
+  $("#edit-form").hidden = true;
+  $("#edit-error").hidden = true;
+}
+
+$("#modal-close").addEventListener("click", () => {
+  $("#details-modal").close();
+});
+
+$("#details-modal").addEventListener("close", resetModal);
+
+$("#edit-expense").addEventListener("click", () => {
+  prefillEdit(state.currentExpense);
+  $("#detail-view").hidden = true;
+  $("#edit-form").hidden = false;
+});
+
+$("#edit-cancel").addEventListener("click", () => {
+  $("#edit-form").hidden = true;
+  $("#edit-error").hidden = true;
+  $("#detail-view").hidden = false;
+});
+
+$("#edit-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const body = JSON.stringify({
+    date: $("#edit-date").value,
+    account: $("#edit-account").value,
+    category: $("#edit-category").value.trim(),
+    amount: $("#edit-amount").value.trim(),
+    kind: $("#edit-kind").value,
+    currency: $("#edit-currency").value.trim(),
+    description: $("#edit-description").value,
+  });
+  try {
+    await api(`/api/expenses/${state.currentExpense.id}`, { method: "PUT", body });
+    $("#details-modal").close();
+    await Promise.all([loadSummary(), loadExpenses()]);
+  } catch (err) {
+    const errorEl = $("#edit-error");
+    errorEl.textContent = err.message;
+    errorEl.hidden = false;
+  }
+});
+
+$("#delete-expense").addEventListener("click", async () => {
+  if (!confirm("Delete this expense?")) return;
+  try {
+    await api(`/api/expenses/${state.currentExpense.id}`, { method: "DELETE" });
+    $("#details-modal").close();
+    await Promise.all([loadSummary(), loadExpenses()]);
+  } catch (err) {
+    $("#details-modal").close();
+    showMessage(err.message, true);
+  }
 });
 
 if (state.token) {
