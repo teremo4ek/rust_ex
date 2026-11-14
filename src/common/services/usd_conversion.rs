@@ -31,7 +31,7 @@ where
 
     let copied = sqlx::query(
         "UPDATE expenses SET amount_usd = amount
-         WHERE user_id = ? AND currency = ? AND amount_usd IS NULL",
+         WHERE user_id = ? AND UPPER(currency) = ? AND amount_usd IS NULL",
     )
     .bind(user_id.to_string())
     .bind(TARGET_CURRENCY)
@@ -42,7 +42,7 @@ where
 
     let pending: Vec<PendingRow> = sqlx::query_as(
         "SELECT id, date, amount FROM expenses
-         WHERE user_id = ? AND currency = ? AND amount_usd IS NULL
+         WHERE user_id = ? AND UPPER(currency) = ? AND amount_usd IS NULL
          ORDER BY rowid",
     )
     .bind(user_id.to_string())
@@ -319,6 +319,29 @@ date,account,category,amount,currency,converted amount,currency,description
         assert_eq!(report, ConversionReport::default());
         let expenses = expenses(&state, user_id).await;
         assert_eq!(expenses[0].amount_usd, None);
+    }
+
+    #[tokio::test]
+    async fn lowercase_currency_still_converted() {
+        let (state, user_id) = registered_state().await;
+        sqlx::query(
+            "INSERT INTO expenses (id, user_id, date, account, category, amount, kind, currency, description)
+             VALUES (?, ?, ?, 'Cash', 'Food', '17.26', 'expense', 'byn', '')",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(user_id.to_string())
+        .bind(chrono::NaiveDate::from_ymd_opt(2026, 4, 22).unwrap())
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        let report = convert(
+            &state,
+            user_id,
+            ok_fetcher(dec!(2.8230), Arc::new(AtomicUsize::new(0))),
+        )
+        .await
+        .unwrap();
+        assert_eq!(report, ConversionReport { converted: 1, skipped: 0 });
     }
 
     #[tokio::test]

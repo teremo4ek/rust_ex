@@ -243,7 +243,7 @@ fn parse_record(record: &StringRecord, user_id: Uuid) -> AppResult<Expense> {
     };
     let amount = parsed.abs();
 
-    let currency = record.get(4).unwrap_or_default().trim().to_string();
+    let currency = record.get(4).unwrap_or_default().trim().to_uppercase();
     let description = record.get(7).unwrap_or_default().trim().to_string();
 
     Ok(Expense {
@@ -487,6 +487,10 @@ pub async fn update_expense(
     if req.amount <= Decimal::ZERO {
         return Err(AppError::BadRequest("amount must be positive".into()));
     }
+    let currency = req.currency.trim().to_uppercase();
+    if currency.is_empty() {
+        return Err(AppError::BadRequest("currency must not be empty".into()));
+    }
 
     let result = sqlx::query(
         "UPDATE expenses
@@ -499,7 +503,7 @@ pub async fn update_expense(
     .bind(req.category)
     .bind(req.amount.to_string())
     .bind(req.kind.to_string())
-    .bind(req.currency)
+    .bind(&currency)
     .bind(req.description)
     .bind(expense_id.to_string())
     .bind(user_id.to_string())
@@ -606,6 +610,16 @@ date,account,category,amount,currency,converted amount,currency,description
 ";
         let result = parse_csv(csv, Uuid::new_v4());
         assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    #[test]
+    fn test_parse_normalizes_currency_case() {
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,Food,-10,byn,-10,byn,Test
+";
+        let expenses = parse_csv(csv, Uuid::new_v4()).unwrap();
+        assert_eq!(expenses[0].currency, "BYN");
     }
 
     async fn test_state() -> AppState {
@@ -898,6 +912,69 @@ date,account,category,amount,currency,converted amount,currency,description
                 receipts_attached: 0
             }
         );
+    }
+
+    #[tokio::test]
+    async fn test_update_expense_normalizes_currency_case() {
+        let (state, user_id) = registered_state().await;
+        crate::common::services::usd_conversion::seed_usd_rate(
+            &state,
+            NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
+            dec!(2.8230),
+        )
+        .await;
+        import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
+        let target = expenses.iter().find(|e| e.amount == dec!(17.26)).unwrap();
+
+        let updated = update_expense(
+            &state,
+            user_id,
+            target.id,
+            UpdateExpenseRequest {
+                date: NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
+                account: Account::Cash,
+                category: "Food".into(),
+                amount: dec!(17.26),
+                kind: TransactionKind::Expense,
+                currency: " byn ".into(),
+                description: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(updated.currency, "BYN");
+        assert_eq!(
+            updated.amount_usd,
+            Some((dec!(17.26) / dec!(2.8230)).round_dp(2))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_expense_rejects_whitespace_currency() {
+        let (state, user_id) = registered_state().await;
+        import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
+        let target = expenses.iter().find(|e| e.amount == dec!(17.26)).unwrap();
+
+        let result = update_expense(
+            &state,
+            user_id,
+            target.id,
+            UpdateExpenseRequest {
+                date: NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
+                account: Account::Cash,
+                category: "Food".into(),
+                amount: dec!(17.26),
+                kind: TransactionKind::Expense,
+                currency: "   ".into(),
+                description: String::new(),
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
     }
 
     #[tokio::test]
