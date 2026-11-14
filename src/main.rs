@@ -46,7 +46,7 @@ async fn run_server() {
         .route("/health", get(|| async { "ok" }));
 
     let addr = format!("0.0.0.0:{}", config.port);
-    tracing::info!("server starting on {}", addr);
+    tracing::info!("server starting on {} (web: http://localhost:{})", addr, config.port);
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();

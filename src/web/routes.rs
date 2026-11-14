@@ -1,4 +1,6 @@
-use axum::routing::{delete, get, post};
+use axum::http::header;
+use axum::response::Html;
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -6,11 +8,16 @@ use tower_http::trace::TraceLayer;
 use crate::common::state::AppState;
 use crate::web::handlers;
 
+const INDEX_HTML: &str = include_str!("../../static/index.html");
+const APP_JS: &str = include_str!("../../static/app.js");
+const STYLE_CSS: &str = include_str!("../../static/style.css");
+
 pub fn create_router(state: AppState) -> Router {
     let protected_routes = Router::new()
         .route("/api/expenses/upload", post(handlers::expenses::upload))
         .route("/api/expenses", get(handlers::expenses::list))
         .route("/api/expenses/{id}", delete(handlers::expenses::delete))
+        .route("/api/expenses/{id}", put(handlers::expenses::update))
         .route(
             "/api/expenses/{id}/receipt",
             get(handlers::expenses::expense_receipt),
@@ -23,6 +30,19 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/analytics/timeline", get(handlers::analytics::timeline));
 
     Router::new()
+        .route("/", get(|| async { Html(INDEX_HTML) }))
+        .route(
+            "/app.js",
+            get(|| async {
+                ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], APP_JS)
+            }),
+        )
+        .route(
+            "/style.css",
+            get(|| async {
+                ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], STYLE_CSS)
+            }),
+        )
         .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/auth/login", post(handlers::auth::login))
         .merge(protected_routes)

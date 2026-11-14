@@ -7,12 +7,12 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::common::error::{AppError, AppResult};
-use crate::common::models::dto::ExpensesQuery;
+use crate::common::models::dto::{ExpensesQuery, UpdateExpenseRequest};
 use crate::common::models::receipt::ReceiptReport;
 use crate::common::models::{Account, Expense, TransactionKind};
 use crate::common::state::AppState;
 
-use super::usd_conversion::ConversionReport;
+use super::usd_conversion::{convert_to_usd, ConversionReport};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ImportReport {
@@ -243,7 +243,7 @@ fn parse_record(record: &StringRecord, user_id: Uuid) -> AppResult<Expense> {
     };
     let amount = parsed.abs();
 
-    let currency = record.get(4).unwrap_or_default().trim().to_string();
+    let currency = record.get(4).unwrap_or_default().trim().to_uppercase();
     let description = record.get(7).unwrap_or_default().trim().to_string();
 
     Ok(Expense {
@@ -334,6 +334,36 @@ fn push_filters<'a>(
     }
 }
 
+fn search_needle(description: Option<&str>) -> Option<String> {
+    description
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(str::to_lowercase)
+}
+
+fn description_matches(description: &str, needle: &str) -> bool {
+    description.to_lowercase().contains(needle)
+}
+
+async fn fetch_all_expenses(
+    state: &AppState,
+    user_id: Uuid,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    category: Option<&str>,
+    account: Option<&str>,
+) -> AppResult<Vec<Expense>> {
+    let mut qb = sqlx::QueryBuilder::new(format!(
+        "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE user_id = "
+    ));
+    qb.push_bind(user_id.to_string());
+    push_filters(&mut qb, from, to, category, account);
+    qb.push(" ORDER BY date DESC, rowid DESC");
+
+    let rows: Vec<ExpenseRow> = qb.build_query_as().fetch_all(&state.pool).await?;
+    rows.into_iter().map(ExpenseRow::into_expense).collect()
+}
+
 pub async fn list_expenses(
     state: &AppState,
     user_id: Uuid,
@@ -341,8 +371,27 @@ pub async fn list_expenses(
 ) -> AppResult<Vec<Expense>> {
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(50).min(100);
-    let offset = (page - 1) as i64 * per_page as i64;
 
+    if let Some(needle) = search_needle(query.description.as_deref()) {
+        let offset = (page - 1) as usize * per_page as usize;
+        let all = fetch_all_expenses(
+            state,
+            user_id,
+            query.from,
+            query.to,
+            query.category.as_deref(),
+            query.account.as_deref(),
+        )
+        .await?;
+        return Ok(all
+            .into_iter()
+            .filter(|e| description_matches(&e.description, &needle))
+            .skip(offset)
+            .take(per_page as usize)
+            .collect());
+    }
+
+    let offset = (page - 1) as i64 * per_page as i64;
     let mut qb = sqlx::QueryBuilder::new(format!(
         "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE user_id = "
     ));
@@ -354,7 +403,7 @@ pub async fn list_expenses(
         query.category.as_deref(),
         query.account.as_deref(),
     );
-    qb.push(" ORDER BY rowid LIMIT ")
+    qb.push(" ORDER BY date DESC, rowid DESC LIMIT ")
         .push_bind(per_page as i64)
         .push(" OFFSET ")
         .push_bind(offset);
@@ -368,6 +417,22 @@ pub async fn count_expenses(
     user_id: Uuid,
     query: &ExpensesQuery,
 ) -> AppResult<usize> {
+    if let Some(needle) = search_needle(query.description.as_deref()) {
+        let all = fetch_all_expenses(
+            state,
+            user_id,
+            query.from,
+            query.to,
+            query.category.as_deref(),
+            query.account.as_deref(),
+        )
+        .await?;
+        return Ok(all
+            .iter()
+            .filter(|e| description_matches(&e.description, &needle))
+            .count());
+    }
+
     let mut qb = sqlx::QueryBuilder::new("SELECT COUNT(*) FROM expenses WHERE user_id = ");
     qb.push_bind(user_id.to_string());
     push_filters(
@@ -395,11 +460,70 @@ pub async fn delete_expense(state: &AppState, user_id: Uuid, expense_id: Uuid) -
     Ok(())
 }
 
+pub async fn get_expense(
+    state: &AppState,
+    user_id: Uuid,
+    expense_id: Uuid,
+) -> AppResult<Expense> {
+    let row: Option<ExpenseRow> = sqlx::query_as(&format!(
+        "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE id = ? AND user_id = ?"
+    ))
+    .bind(expense_id.to_string())
+    .bind(user_id.to_string())
+    .fetch_optional(&state.pool)
+    .await?;
+
+    row.map(ExpenseRow::into_expense)
+        .transpose()?
+        .ok_or_else(|| AppError::NotFound("expense not found".into()))
+}
+
+pub async fn update_expense(
+    state: &AppState,
+    user_id: Uuid,
+    expense_id: Uuid,
+    req: UpdateExpenseRequest,
+) -> AppResult<Expense> {
+    if req.amount <= Decimal::ZERO {
+        return Err(AppError::BadRequest("amount must be positive".into()));
+    }
+    let currency = req.currency.trim().to_uppercase();
+    if currency.is_empty() {
+        return Err(AppError::BadRequest("currency must not be empty".into()));
+    }
+
+    let result = sqlx::query(
+        "UPDATE expenses
+         SET date = ?, account = ?, category = ?, amount = ?, kind = ?, currency = ?,
+             description = ?, amount_usd = NULL
+         WHERE id = ? AND user_id = ?",
+    )
+    .bind(req.date)
+    .bind(req.account.to_string())
+    .bind(req.category)
+    .bind(req.amount.to_string())
+    .bind(req.kind.to_string())
+    .bind(&currency)
+    .bind(req.description)
+    .bind(expense_id.to_string())
+    .bind(user_id.to_string())
+    .execute(&state.pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("expense not found".into()));
+    }
+
+    let _ = convert_to_usd(state, user_id).await;
+    get_expense(state, user_id, expense_id).await
+}
+
 pub async fn get_user_expenses(
     state: &AppState,
     user_id: Uuid,
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
+    description: Option<&str>,
 ) -> AppResult<Vec<Expense>> {
     let mut qb = sqlx::QueryBuilder::new(format!(
         "SELECT {EXPENSE_COLUMNS} FROM expenses WHERE user_id = "
@@ -409,7 +533,14 @@ pub async fn get_user_expenses(
     qb.push(" ORDER BY rowid");
 
     let rows: Vec<ExpenseRow> = qb.build_query_as().fetch_all(&state.pool).await?;
-    rows.into_iter().map(ExpenseRow::into_expense).collect()
+    let mut expenses: Vec<Expense> = rows
+        .into_iter()
+        .map(ExpenseRow::into_expense)
+        .collect::<AppResult<Vec<_>>>()?;
+    if let Some(needle) = search_needle(description) {
+        expenses.retain(|e| description_matches(&e.description, &needle));
+    }
+    Ok(expenses)
 }
 
 #[cfg(test)]
@@ -481,6 +612,16 @@ date,account,category,amount,currency,converted amount,currency,description
         assert!(matches!(result, Err(AppError::BadRequest(_))));
     }
 
+    #[test]
+    fn test_parse_normalizes_currency_case() {
+        let csv = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,Food,-10,byn,-10,byn,Test
+";
+        let expenses = parse_csv(csv, Uuid::new_v4()).unwrap();
+        assert_eq!(expenses[0].currency, "BYN");
+    }
+
     async fn test_state() -> AppState {
         let config = Config {
             jwt_secret: "test_secret".into(),
@@ -511,6 +652,7 @@ date,account,category,amount,currency,converted amount,currency,description
             to: None,
             category: None,
             account: None,
+            description: None,
             page: None,
             per_page: None,
         }
@@ -534,6 +676,41 @@ date,account,category,amount,currency,converted amount,currency,description
         );
         let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
         assert!(expenses.iter().all(|e| e.amount_usd.is_none()));
+    }
+
+    #[tokio::test]
+    async fn test_description_filter_cyrillic_case_insensitive() {
+        let (state, user_id) = registered_state().await;
+        import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        let mut query = empty_query();
+        query.description = Some("сухофрукты".into());
+        assert_eq!(
+            count_expenses(&state, user_id, &query).await.unwrap(),
+            1
+        );
+        let expenses = list_expenses(&state, user_id, &query).await.unwrap();
+        assert_eq!(expenses.len(), 1);
+        assert_eq!(expenses[0].description, "Сухофрукты");
+    }
+
+    #[tokio::test]
+    async fn test_description_filter_paginates_in_rust() {
+        let (state, user_id) = registered_state().await;
+        let seed = "\
+date,account,category,amount,currency,converted amount,currency,description
+4/22/2026,Cash,Food,-10,BYN,-10,BYN,Coffee shop
+4/21/2026,Cash,Food,-5,BYN,-5,BYN,Metro
+4/20/2026,Cash,Food,-7,BYN,-7,BYN,coffee to go
+";
+        import_csv(&state, user_id, seed).await.unwrap();
+        let mut query = empty_query();
+        query.description = Some("COFFEE".into());
+        query.page = Some(2);
+        query.per_page = Some(1);
+        assert_eq!(count_expenses(&state, user_id, &query).await.unwrap(), 2);
+        let expenses = list_expenses(&state, user_id, &query).await.unwrap();
+        assert_eq!(expenses.len(), 1);
+        assert!(expenses[0].description.to_lowercase().contains("coffee"));
     }
 
     #[tokio::test]
@@ -735,6 +912,69 @@ date,account,category,amount,currency,converted amount,currency,description
                 receipts_attached: 0
             }
         );
+    }
+
+    #[tokio::test]
+    async fn test_update_expense_normalizes_currency_case() {
+        let (state, user_id) = registered_state().await;
+        crate::common::services::usd_conversion::seed_usd_rate(
+            &state,
+            NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
+            dec!(2.8230),
+        )
+        .await;
+        import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
+        let target = expenses.iter().find(|e| e.amount == dec!(17.26)).unwrap();
+
+        let updated = update_expense(
+            &state,
+            user_id,
+            target.id,
+            UpdateExpenseRequest {
+                date: NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
+                account: Account::Cash,
+                category: "Food".into(),
+                amount: dec!(17.26),
+                kind: TransactionKind::Expense,
+                currency: " byn ".into(),
+                description: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(updated.currency, "BYN");
+        assert_eq!(
+            updated.amount_usd,
+            Some((dec!(17.26) / dec!(2.8230)).round_dp(2))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_expense_rejects_whitespace_currency() {
+        let (state, user_id) = registered_state().await;
+        import_csv(&state, user_id, VALID_CSV).await.unwrap();
+        let expenses = list_expenses(&state, user_id, &empty_query()).await.unwrap();
+        let target = expenses.iter().find(|e| e.amount == dec!(17.26)).unwrap();
+
+        let result = update_expense(
+            &state,
+            user_id,
+            target.id,
+            UpdateExpenseRequest {
+                date: NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
+                account: Account::Cash,
+                category: "Food".into(),
+                amount: dec!(17.26),
+                kind: TransactionKind::Expense,
+                currency: "   ".into(),
+                description: String::new(),
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
     }
 
     #[tokio::test]

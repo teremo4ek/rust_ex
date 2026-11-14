@@ -53,7 +53,7 @@ Always run `cargo clippy` and `cargo test` before reporting work as done.
 - Money is `rust_decimal::Decimal` end-to-end, never `f64`; JSON money fields are strings; `dec!()` needs the `macros` feature; CLI renders 2 dp via `{:.2}`
 - Amounts are positive everywhere; direction lives in `kind` (`'expense'`/`'income'`) — the sign exists only in CSV input. CSV dedup key includes `kind`
 - sqlx 0.8 lacks rust_decimal for SQLite: amounts are TEXT (`Decimal::to_string()` on write, parse on read); never `SUM(amount)` in SQL (TEXT→REAL float drift) — Decimal aggregation stays in Rust (`analytics_service`)
-- Dates are ISO TEXT; bind `NaiveDate` directly (sqlx chrono encodes `%F`); lists order by `rowid` (insertion order)
+- Dates are ISO TEXT; bind `NaiveDate` directly (sqlx chrono encodes `%F`); web lists order by `date DESC, rowid DESC` (newest first), analytics fetch keeps `rowid` order
 - `sqlite::memory:` is private per connection: test pools need `max_connections(1)` and no `idle_timeout`/`max_lifetime` (`src/common/db.rs`); `foreign_keys` is per-connection — set in connect options, never a one-off PRAGMA
 - Migrations are compile-time embedded — new files need a rebuild
 - NBRB has a rate for every calendar date (no walk-back fallback); `Decimal / 0` panics — conversion guards `rate > 0`; a corrupt cached rate refetches and overwrites (`INSERT OR REPLACE`)

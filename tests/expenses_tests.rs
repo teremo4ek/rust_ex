@@ -156,6 +156,35 @@ async fn get_json(app: &axum::Router, token: &str, uri: &str) -> (StatusCode, se
     (status, body)
 }
 
+async fn put_json(
+    app: &axum::Router,
+    token: &str,
+    uri: &str,
+    value: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("PUT")
+                .uri(uri)
+                .header("authorization", common::auth_header(token))
+                .header("content-type", "application/json")
+                .body(Body::from(value.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let body = serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    (status, body)
+}
+
 #[tokio::test]
 async fn test_upload_csv_twice_second_is_all_duplicates() {
     let (app, state) = common::create_test_app_with_state().await;
@@ -192,7 +221,8 @@ async fn test_upload_csv_twice_second_is_all_duplicates() {
     .unwrap();
     assert_eq!(body["total"].as_u64().unwrap(), 41);
     assert_eq!(body["expenses"].as_array().unwrap().len(), 41);
-    assert_eq!(body["expenses"][0]["amount"].as_str().unwrap(), "17.26");
+    assert_eq!(body["expenses"][0]["amount"].as_str().unwrap(), "21.08");
+    assert_eq!(body["expenses"][0]["account"].as_str().unwrap(), "payment_card");
     assert_eq!(body["expenses"][0]["kind"].as_str().unwrap(), "expense");
     assert!(
         body["expenses"]
@@ -208,6 +238,58 @@ async fn test_upload_csv_twice_second_is_all_duplicates() {
             .iter()
             .all(|e| matches!(e["kind"].as_str(), Some("expense") | Some("income")))
     );
+}
+
+#[tokio::test]
+async fn test_list_expenses_newest_first() {
+    let app = common::create_test_app().await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+    upload_fixture(&app, &token).await;
+
+    let (_, body) = get_json(&app, &token, "/api/expenses").await;
+
+    let expenses = body["expenses"].as_array().unwrap();
+    assert_eq!(expenses[0]["date"].as_str().unwrap(), "2026-05-04");
+    assert_eq!(expenses[0]["amount"].as_str().unwrap(), "21.08");
+    let dates: Vec<&str> = expenses
+        .iter()
+        .map(|e| e["date"].as_str().unwrap())
+        .collect();
+    assert!(
+        dates.windows(2).all(|w| w[0] >= w[1]),
+        "dates must be non-increasing, got {:?}",
+        dates
+    );
+}
+
+#[tokio::test]
+async fn test_list_expenses_description_filter() {
+    let app = common::create_test_app().await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+    upload_fixture(&app, &token).await;
+
+    let (status, body) = get_json(&app, &token, "/api/expenses?description=grocery%20store").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["total"].as_u64().unwrap(), 10);
+    let expenses = body["expenses"].as_array().unwrap();
+    assert!(expenses
+        .iter()
+        .all(|e| e["description"].as_str().unwrap() == "Grocery store"));
+
+    let (status, page2) = get_json(
+        &app,
+        &token,
+        "/api/expenses?description=grocery%20store&page=2&per_page=3",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page2["page"].as_u64().unwrap(), 2);
+    assert_eq!(page2["total"].as_u64().unwrap(), 10);
+    let page2_rows = page2["expenses"].as_array().unwrap();
+    assert_eq!(page2_rows.len(), 3);
+    assert!(page2_rows
+        .iter()
+        .all(|e| e["description"].as_str().unwrap() == "Grocery store"));
 }
 
 #[tokio::test]
@@ -554,6 +636,179 @@ async fn test_receipt_url_requires_auth() {
                 .body(Body::from(
                     serde_json::json!({ "url": "https://example.com/r.html" }).to_string(),
                 ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+async fn upload_one_expense(app: &axum::Router, token: &str) -> String {
+    let csv = "date,account,category,amount,currency,converted amount,currency,description\n\
+               4/22/2026,Cash,Food,-17.26,BYN,-17.26,BYN,\"Dried fruit \"\n";
+    upload_bytes(app, token, "one.csv", "text/csv", csv.as_bytes()).await;
+    let (_, list) = get_json(app, token, "/api/expenses").await;
+    list["expenses"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn update_body(amount: &str, date: &str, currency: &str) -> serde_json::Value {
+    serde_json::json!({
+        "date": date,
+        "account": "payment_card",
+        "category": "Grocery",
+        "amount": amount,
+        "kind": "income",
+        "currency": currency,
+        "description": "edited",
+    })
+}
+
+#[tokio::test]
+async fn test_update_expense_recomputes_amount_usd() {
+    let (app, state) = common::create_test_app_with_state().await;
+    common::seed_rate(
+        &state,
+        chrono::NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
+        rust_decimal::dec!(2.8230),
+    )
+    .await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+    let id = upload_one_expense(&app, &token).await;
+
+    let (status, body) = put_json(
+        &app,
+        &token,
+        &format!("/api/expenses/{id}"),
+        update_body("20", "2026-04-22", "BYN"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["amount"], "20");
+    assert_eq!(body["account"], "payment_card");
+    assert_eq!(body["kind"], "income");
+    assert_eq!(body["category"], "Grocery");
+    assert_eq!(body["amount_usd"], "7.08");
+
+    let (status, body) = put_json(
+        &app,
+        &token,
+        &format!("/api/expenses/{id}"),
+        update_body("20", "2026-03-01", "EUR"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["amount_usd"].is_null());
+
+    let (_, list) = get_json(&app, &token, "/api/expenses").await;
+    assert_eq!(list["expenses"][0]["category"], "Grocery");
+    assert_eq!(list["expenses"][0]["amount_usd"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn test_update_missing_expense_returns_404() {
+    let app = common::create_test_app().await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+
+    let id = uuid::Uuid::new_v4();
+    let (status, body) = put_json(
+        &app,
+        &token,
+        &format!("/api/expenses/{id}"),
+        update_body("20", "2026-04-22", "BYN"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body["error"].as_str().unwrap().contains("expense not found"));
+}
+
+#[tokio::test]
+async fn test_update_expense_of_other_user_returns_404() {
+    let (app, state) = common::create_test_app_with_state().await;
+    common::seed_rate(
+        &state,
+        chrono::NaiveDate::from_ymd_opt(2026, 4, 22).unwrap(),
+        rust_decimal::dec!(2.8230),
+    )
+    .await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+    let id = upload_one_expense(&app, &token).await;
+
+    let second = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"email": "other@example.com", "password": "password123"})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::CREATED);
+    let second: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(second.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let other_token = second["token"].as_str().unwrap();
+
+    let (status, _) = put_json(
+        &app,
+        other_token,
+        &format!("/api/expenses/{id}"),
+        update_body("20", "2026-04-22", "BYN"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_update_rejects_non_positive_amount() {
+    let app = common::create_test_app().await;
+    let (token, _user_id) = common::register_and_login(&app).await;
+    let id = uuid::Uuid::new_v4();
+
+    for amount in ["0", "-5"] {
+        let (status, body) = put_json(
+            &app,
+            &token,
+            &format!("/api/expenses/{id}"),
+            update_body(amount, "2026-04-22", "BYN"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"]
+            .as_str()
+            .unwrap()
+            .contains("amount must be positive"));
+    }
+}
+
+#[tokio::test]
+async fn test_update_requires_auth() {
+    let app = common::create_test_app().await;
+    let id = uuid::Uuid::new_v4();
+
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("PUT")
+                .uri(format!("/api/expenses/{id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(update_body("20", "2026-04-22", "BYN").to_string()))
                 .unwrap(),
         )
         .await

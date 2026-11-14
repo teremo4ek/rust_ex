@@ -26,6 +26,25 @@ pub fn summary(expenses: &[Expense]) -> SummaryResponse {
     }
 }
 
+pub fn summary_usd(expenses: &[Expense]) -> SummaryResponse {
+    let total_income: Decimal = expenses
+        .iter()
+        .filter(|e| e.kind == TransactionKind::Income)
+        .filter_map(|e| e.amount_usd)
+        .sum();
+    let total_expense: Decimal = expenses
+        .iter()
+        .filter(|e| e.kind == TransactionKind::Expense)
+        .filter_map(|e| e.amount_usd)
+        .sum();
+
+    SummaryResponse {
+        total_income,
+        total_expense,
+        net: total_income - total_expense,
+    }
+}
+
 pub fn by_category(expenses: &[Expense]) -> Vec<CategoryBreakdown> {
     let total: Decimal = expenses
         .iter()
@@ -166,6 +185,23 @@ mod tests {
         assert_eq!(result.total_income, dec!(100));
         assert_eq!(result.total_expense, dec!(80));
         assert_eq!(result.net, dec!(20));
+    }
+
+    #[test]
+    fn test_summary_usd_skips_unconverted() {
+        let mut income =
+            make_expense("4/22/2026", "Deposits", Account::Cash, dec!(100.0), TransactionKind::Income);
+        income.amount_usd = Some(dec!(35.42));
+        let mut expense =
+            make_expense("4/22/2026", "Food", Account::Cash, dec!(50.0), TransactionKind::Expense);
+        expense.amount_usd = Some(dec!(17.71));
+        let unconverted =
+            make_expense("4/23/2026", "Food", Account::Cash, dec!(30.0), TransactionKind::Expense);
+
+        let result = summary_usd(&[income, expense, unconverted]);
+        assert_eq!(result.total_income, dec!(35.42));
+        assert_eq!(result.total_expense, dec!(17.71));
+        assert_eq!(result.net, dec!(17.71));
     }
 
     #[test]

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%234f46e5'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<section id="auth" class="auth-wrap" hidden>
+  <div class="card auth-card">
+    <h1>Expense Tracker</h1>
+    <div class="tabs">
+      <button type="button" id="tab-login" class="tab active">Sign in</button>
+      <button type="button" id="tab-register" class="tab">Register</button>
+    </div>
+    <form id="auth-form">
+      <label>Email
+        <input type="email" id="email" required autocomplete="email">
+      </label>
+      <label>Password
+        <input type="password" id="password" required minlength="8" autocomplete="current-password">
+      </label>
+      <button type="submit" id="auth-submit" class="btn primary wide">Sign in</button>
+    </form>
+  </div>
+</section>
+
+<section id="app" hidden>
+  <header class="topbar">
+    <span class="brand">Expense Tracker</span>
+    <span class="spacer"></span>
+    <span id="user-email" class="user"></span>
+    <button type="button" id="logout" class="btn ghost">Log out</button>
+  </header>
+
+  <main>
+    <div id="message" class="message" hidden></div>
+
+    <div class="summary">
+      <div class="card stat"><span class="stat-label">Income</span><span class="stat-value pos" id="sum-income">–</span></div>
+      <div class="card stat"><span class="stat-label">Expenses</span><span class="stat-value neg" id="sum-expense">–</span></div>
+      <div class="card stat"><span class="stat-label">Net</span><span class="stat-value" id="sum-net">–</span></div>
+    </div>
+
+    <div class="card toolbar">
+      <form id="filters" class="filters">
+        <button type="button" class="btn ghost" id="prev-month" title="Previous month" aria-label="Previous month">‹</button>
+        <label>From <input type="date" id="from"></label>
+        <label>To <input type="date" id="to"></label>
+        <button type="button" class="btn ghost" id="next-month" title="Next month" aria-label="Next month">›</button>
+        <input type="search" id="search" placeholder="Search description" aria-label="Search description">
+        <button type="submit" class="btn">Apply</button>
+      </form>
+      <form id="upload-form" class="upload">
+        <label class="btn primary file-btn">Upload CSV / receipt
+          <input type="file" id="file" hidden>
+        </label>
+      </form>
+    </div>
+
+    <div class="card table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th><th>Account</th><th>Category</th><th>Description</th>
+            <th class="num">Amount</th><th class="num">USD</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+    <p id="empty-hint" class="empty-hint" hidden>No transactions in the selected period</p>
+
+    <div class="pager">
+      <button type="button" id="prev" class="btn">← Prev</button>
+      <span id="page-info"></span>
+      <button type="button" id="next" class="btn">Next →</button>
+    </div>
+  </main>
+</section>
+
+<dialog id="details-modal" class="modal">
+    <div id="detail-view">
+      <div class="modal-head">
+        <h2>Transaction details</h2>
+        <button type="button" id="modal-close" class="btn ghost">✕</button>
+      </div>
+      <dl id="detail-fields" class="detail-grid"></dl>
+      <h3>Receipt</h3>
+      <div id="receipt-block"></div>
+      <div class="modal-actions">
+        <button type="button" id="delete-expense" class="btn danger">Delete</button>
+        <button type="button" id="edit-expense" class="btn">Edit</button>
+        <button type="button" id="modal-ok" class="btn primary">OK</button>
+      </div>
+    </div>
+    <form id="edit-form" class="edit-grid" hidden>
+      <label>Date <input type="date" id="edit-date" required></label>
+      <label>Account
+        <select id="edit-account">
+          <option value="cash">Cash</option>
+          <option value="payment_card">Payment card</option>
+        </select>
+      </label>
+      <label>Category <input type="text" id="edit-category" required></label>
+      <label>Kind
+        <select id="edit-kind">
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+        </select>
+      </label>
+      <label>Amount <input type="text" id="edit-amount" inputmode="decimal" required></label>
+      <label>Currency <input type="text" id="edit-currency" maxlength="8" required></label>
+      <label class="span2">Description <textarea id="edit-description" rows="2"></textarea></label>
+      <div id="edit-error" class="message error" hidden></div>
+      <div class="modal-actions span2">
+        <button type="button" id="edit-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+<script src="/app.js"></script>
+</body>
+</html>

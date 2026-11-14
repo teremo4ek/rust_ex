@@ -6,14 +6,15 @@ use uuid::Uuid;
 
 use crate::common::error::AppResult;
 use crate::common::models::dto::{
-    ExpensesQuery, ExpensesResponse, ReceiptUploadResponse, UploadResponse,
+    ExpensesQuery, ExpensesResponse, ReceiptUploadResponse, UpdateExpenseRequest, UploadResponse,
 };
-use crate::common::models::Receipt;
+use crate::common::models::{Expense, Receipt};
 use crate::common::services::expense_service::UploadOutcome;
 use crate::common::services::usd_conversion::ConversionReport;
 use crate::common::services::{expense_service, receipt_service};
 use crate::common::state::AppState;
 use crate::web::middleware::auth::AuthUser;
+use validator::Validate;
 
 pub(crate) fn outcome_response(
     outcome: UploadOutcome,
@@ -68,6 +69,17 @@ pub async fn list(
         page,
         per_page,
     }))
+}
+
+pub async fn update(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateExpenseRequest>,
+) -> AppResult<Json<Expense>> {
+    req.validate()?;
+    let expense = expense_service::update_expense(&state, auth.id, id, req).await?;
+    Ok(Json(expense))
 }
 
 pub async fn delete(

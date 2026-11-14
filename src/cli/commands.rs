@@ -219,7 +219,8 @@ pub async fn execute(state: &AppState, user_id: Uuid, command: &Command) -> AppR
             Ok(Outcome::Output(output))
         }
         Command::Stats { view, from, to } => {
-            let expenses = expense_service::get_user_expenses(state, user_id, *from, *to).await?;
+            let expenses =
+                expense_service::get_user_expenses(state, user_id, *from, *to, None).await?;
             if expenses.is_empty() {
                 return Ok(Outcome::Output(
                     "No expenses found for the selected period.".into(),
