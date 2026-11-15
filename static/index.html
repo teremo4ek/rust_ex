@@ -60,11 +60,31 @@
         <input type="search" id="search" placeholder="Search description" aria-label="Search description" hidden>
         <button type="submit" class="btn">Apply</button>
       </form>
-      <form id="upload-form" class="upload">
-        <label class="btn primary file-btn">Upload CSV / receipt
-          <input type="file" id="file" hidden>
-        </label>
-      </form>
+      <div id="import-box" class="import-box">
+        <button type="button" class="btn primary" id="import-toggle" aria-expanded="false" aria-controls="import-panel">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 11V3"></path>
+            <path d="m4.5 6.5 3.5-3.5 3.5 3.5"></path>
+            <path d="M2.5 13h11"></path>
+          </svg>
+          Import
+          <svg class="chev" width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m4 6.5 4 4 4-4"></path>
+          </svg>
+        </button>
+        <div id="import-panel" class="import-panel card" hidden>
+          <p class="import-hint">CSV adds transactions. A receipt (PDF/HTML file or URL) attaches to a same-date expense.</p>
+          <form id="upload-form" class="upload">
+            <label class="btn file-btn">Upload CSV / receipt
+              <input type="file" id="file" hidden>
+            </label>
+          </form>
+          <form id="url-form" class="url" novalidate>
+            <input type="url" id="receipt-url" placeholder="https://…" aria-label="Receipt URL" autocomplete="off" spellcheck="false">
+            <button type="submit" class="btn">Add</button>
+          </form>
+        </div>
+      </div>
     </div>
 
     <div class="card table-wrap">

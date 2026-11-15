@@ -259,6 +259,41 @@ $("#search").addEventListener("keydown", (event) => {
   if (event.key === "Escape") hideSearch();
 });
 
+function closeImportPanel() {
+  $("#import-panel").hidden = true;
+  $("#import-toggle").setAttribute("aria-expanded", "false");
+  $("#receipt-url").value = "";
+}
+
+$("#import-toggle").addEventListener("click", () => {
+  if (!$("#import-panel").hidden) return closeImportPanel();
+  $("#import-panel").hidden = false;
+  $("#import-toggle").setAttribute("aria-expanded", "true");
+  $("#receipt-url").focus();
+});
+
+document.addEventListener("click", (event) => {
+  if (!$("#import-panel").hidden && !event.target.closest("#import-box")) closeImportPanel();
+});
+
+$("#import-panel").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeImportPanel();
+});
+
+$("#url-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const url = $("#receipt-url").value.trim();
+  if (!url) return;
+  try {
+    const data = await api("/api/receipts/url", { method: "POST", body: JSON.stringify({ url }) });
+    closeImportPanel();
+    showMessage(uploadReport(data));
+    await Promise.all([loadSummary(), loadExpenses()]);
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+});
+
 $("#upload-form").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   event.target.value = "";
@@ -267,6 +302,7 @@ $("#upload-form").addEventListener("change", async (event) => {
   body.append("file", file);
   try {
     const data = await api("/api/expenses/upload", { method: "POST", body });
+    closeImportPanel();
     showMessage(uploadReport(data));
     await Promise.all([loadSummary(), loadExpenses()]);
   } catch (err) {
