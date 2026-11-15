@@ -51,7 +51,13 @@
         <label>From <input type="date" id="from"></label>
         <label>To <input type="date" id="to"></label>
         <button type="button" class="btn ghost" id="next-month" title="Next month" aria-label="Next month">›</button>
-        <input type="search" id="search" placeholder="Search description" aria-label="Search description">
+        <button type="button" class="btn ghost icon" id="search-toggle" title="Search description" aria-label="Search description" aria-expanded="false">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.5"></circle>
+            <line x1="10.8" y1="10.8" x2="14" y2="14"></line>
+          </svg>
+        </button>
+        <input type="search" id="search" placeholder="Search description" aria-label="Search description" hidden>
         <button type="submit" class="btn">Apply</button>
       </form>
       <form id="upload-form" class="upload">

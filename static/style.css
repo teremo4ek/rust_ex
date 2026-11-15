@@ -75,8 +75,10 @@ main { max-width: 60rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; display: gr
 
 .toolbar { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: .75rem; padding: .9rem 1.1rem; }
 .filters { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
-.filters label { margin: 0; }
-.filters .btn { margin-bottom: 1px; }
+.toolbar label { margin: 0; font-size: inherit; opacity: 1; }
+.toolbar .btn { margin-bottom: 1px; }
+.upload { display: flex; align-items: end; }
+.btn.icon { padding-inline: .6rem; }
 
 .table-wrap { overflow-x: auto; padding: .25rem .5rem; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }

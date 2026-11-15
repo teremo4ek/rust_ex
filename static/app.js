@@ -234,6 +234,31 @@ function shiftMonth(offset) {
 $("#prev-month").addEventListener("click", () => shiftMonth(-1));
 $("#next-month").addEventListener("click", () => shiftMonth(1));
 
+function hideSearch() {
+  const hadQuery = $("#search").value.trim() !== "";
+  $("#search").hidden = true;
+  $("#search").value = "";
+  $("#search-toggle").setAttribute("aria-expanded", "false");
+  if (hadQuery) {
+    state.page = 1;
+    refresh();
+  }
+}
+
+$("#search-toggle").addEventListener("click", () => {
+  if ($("#search").hidden) {
+    $("#search").hidden = false;
+    $("#search-toggle").setAttribute("aria-expanded", "true");
+    $("#search").focus();
+  } else {
+    hideSearch();
+  }
+});
+
+$("#search").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideSearch();
+});
+
 $("#upload-form").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   event.target.value = "";
