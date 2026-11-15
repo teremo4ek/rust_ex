@@ -259,6 +259,38 @@ $("#search").addEventListener("keydown", (event) => {
   if (event.key === "Escape") hideSearch();
 });
 
+function hideUrlInput() {
+  $("#receipt-url").value = "";
+  $("#url-fields").hidden = true;
+  $("#url-toggle").setAttribute("aria-expanded", "false");
+}
+
+$("#url-toggle").addEventListener("click", () => {
+  const collapsed = $("#url-fields").hidden;
+  $("#url-fields").hidden = !collapsed;
+  $("#url-toggle").setAttribute("aria-expanded", String(collapsed));
+  if (collapsed) $("#receipt-url").focus();
+  else hideUrlInput();
+});
+
+$("#receipt-url").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideUrlInput();
+});
+
+$("#url-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const url = $("#receipt-url").value.trim();
+  if (!url) return;
+  try {
+    const data = await api("/api/receipts/url", { method: "POST", body: JSON.stringify({ url }) });
+    hideUrlInput();
+    showMessage(uploadReport(data));
+    await Promise.all([loadSummary(), loadExpenses()]);
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+});
+
 $("#upload-form").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   event.target.value = "";

@@ -60,11 +60,26 @@
         <input type="search" id="search" placeholder="Search description" aria-label="Search description" hidden>
         <button type="submit" class="btn">Apply</button>
       </form>
-      <form id="upload-form" class="upload">
-        <label class="btn primary file-btn">Upload CSV / receipt
-          <input type="file" id="file" hidden>
-        </label>
-      </form>
+      <div class="actions">
+        <form id="url-form" class="url" novalidate>
+          <button type="button" class="btn ghost icon" id="url-toggle" title="Import receipt by URL" aria-label="Import receipt by URL" aria-expanded="false">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M6.5 9.5 9.5 6.5"></path>
+              <path d="M7.3 4.7 8.6 3.4a2.7 2.7 0 0 1 3.8 3.8l-1.3 1.3"></path>
+              <path d="M8.7 11.3 7.4 12.6a2.7 2.7 0 0 1-3.8-3.8l1.3-1.3"></path>
+            </svg>
+          </button>
+          <span class="url-fields" hidden>
+            <input type="url" id="receipt-url" placeholder="https://…" aria-label="Receipt URL" autocomplete="off" spellcheck="false">
+            <button type="submit" class="btn">Add</button>
+          </span>
+        </form>
+        <form id="upload-form" class="upload">
+          <label class="btn primary file-btn">Upload CSV / receipt
+            <input type="file" id="file" hidden>
+          </label>
+        </form>
+      </div>
     </div>
 
     <div class="card table-wrap">
