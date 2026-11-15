@@ -30,17 +30,32 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/analytics/timeline", get(handlers::analytics::timeline));
 
     Router::new()
-        .route("/", get(|| async { Html(INDEX_HTML) }))
+        .route(
+            "/",
+            get(|| async { ([(header::CACHE_CONTROL, "no-cache")], Html(INDEX_HTML)) }),
+        )
         .route(
             "/app.js",
             get(|| async {
-                ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], APP_JS)
+                (
+                    [
+                        (header::CACHE_CONTROL, "no-cache"),
+                        (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+                    ],
+                    APP_JS,
+                )
             }),
         )
         .route(
             "/style.css",
             get(|| async {
-                ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], STYLE_CSS)
+                (
+                    [
+                        (header::CACHE_CONTROL, "no-cache"),
+                        (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+                    ],
+                    STYLE_CSS,
+                )
             }),
         )
         .route("/api/auth/register", post(handlers::auth::register))
