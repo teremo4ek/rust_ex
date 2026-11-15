@@ -259,22 +259,25 @@ $("#search").addEventListener("keydown", (event) => {
   if (event.key === "Escape") hideSearch();
 });
 
-function hideUrlInput() {
+function closeImportPanel() {
+  $("#import-panel").hidden = true;
+  $("#import-toggle").setAttribute("aria-expanded", "false");
   $("#receipt-url").value = "";
-  $("#url-fields").hidden = true;
-  $("#url-toggle").setAttribute("aria-expanded", "false");
 }
 
-$("#url-toggle").addEventListener("click", () => {
-  const collapsed = $("#url-fields").hidden;
-  $("#url-fields").hidden = !collapsed;
-  $("#url-toggle").setAttribute("aria-expanded", String(collapsed));
-  if (collapsed) $("#receipt-url").focus();
-  else hideUrlInput();
+$("#import-toggle").addEventListener("click", () => {
+  if (!$("#import-panel").hidden) return closeImportPanel();
+  $("#import-panel").hidden = false;
+  $("#import-toggle").setAttribute("aria-expanded", "true");
+  $("#receipt-url").focus();
 });
 
-$("#receipt-url").addEventListener("keydown", (event) => {
-  if (event.key === "Escape") hideUrlInput();
+document.addEventListener("click", (event) => {
+  if (!$("#import-panel").hidden && !event.target.closest("#import-box")) closeImportPanel();
+});
+
+$("#import-panel").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeImportPanel();
 });
 
 $("#url-form").addEventListener("submit", async (event) => {
@@ -283,7 +286,7 @@ $("#url-form").addEventListener("submit", async (event) => {
   if (!url) return;
   try {
     const data = await api("/api/receipts/url", { method: "POST", body: JSON.stringify({ url }) });
-    hideUrlInput();
+    closeImportPanel();
     showMessage(uploadReport(data));
     await Promise.all([loadSummary(), loadExpenses()]);
   } catch (err) {
@@ -299,6 +302,7 @@ $("#upload-form").addEventListener("change", async (event) => {
   body.append("file", file);
   try {
     const data = await api("/api/expenses/upload", { method: "POST", body });
+    closeImportPanel();
     showMessage(uploadReport(data));
     await Promise.all([loadSummary(), loadExpenses()]);
   } catch (err) {

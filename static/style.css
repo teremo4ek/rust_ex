@@ -77,11 +77,21 @@ main { max-width: 60rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; display: gr
 .filters { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
 .toolbar label { margin: 0; font-size: inherit; opacity: 1; }
 .toolbar .btn { margin-bottom: 1px; }
-.actions { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
-.url, .url-fields { display: flex; align-items: end; gap: .5rem; }
-#receipt-url { width: 14rem; max-width: 60vw; }
 .upload { display: flex; align-items: end; }
 .btn.icon { padding-inline: .6rem; }
+.import-box { position: relative; }
+.import-panel {
+  position: absolute; right: 0; top: calc(100% + .45rem); z-index: 10;
+  width: min(22rem, calc(100vw - 2rem));
+  display: grid; gap: .6rem; padding: .9rem 1rem;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .14);
+}
+.import-hint { margin: 0; font-size: .8rem; opacity: .75; }
+.import-panel .upload, .import-panel .url { display: flex; }
+.import-panel .file-btn { flex: 1; text-align: center; }
+#receipt-url { flex: 1; min-width: 0; width: auto; }
+#import-toggle .chev { transition: transform .15s ease; }
+#import-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
 
 .table-wrap { overflow-x: auto; padding: .25rem .5rem; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
