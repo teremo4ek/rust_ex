@@ -24,7 +24,6 @@ Built with Rust to practice async programming, web frameworks, and modern Rust p
 | Method | Path                 | Description             |
 | ------ | -------------------- | ----------------------- |
 | `GET`  | `/health`            | Health check            |
-| `POST` | `/api/auth/register` | Register a new user     |
 | `POST` | `/api/auth/login`    | Login and get JWT token |
 
 ### Protected (require `Authorization: Bearer <token>`)
@@ -129,11 +128,7 @@ PDF upload response example:
 ## Example Usage
 
 ```bash
-# Register
-curl -X POST http://localhost:3000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "password": "password123"}'
-
+# Register (CLI only): `cargo run -- cli` and pick "Register"
 # Login
 curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
@@ -193,7 +188,7 @@ src/
 │   └── helpers/            # NBRB exchange rate helper
 ├── web/
 │   ├── routes.rs           # route definitions
-│   ├── handlers/           # register, login, upload, list, delete, analytics
+│   ├── handlers/           # login, upload, list, delete, analytics
 │   └── middleware/auth.rs  # JWT extractor
 └── cli/
     ├── session.rs          # interactive loop (login/register menu, commands)
