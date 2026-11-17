@@ -1,36 +1,11 @@
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::Json;
 use validator::Validate;
 
 use crate::common::error::AppResult;
-use crate::common::models::{LoginRequest, LoginResponse, RegisterRequest};
+use crate::common::models::{LoginRequest, LoginResponse};
 use crate::common::services::auth_service;
 use crate::common::state::AppState;
-
-pub async fn register(
-    State(state): State<AppState>,
-    Json(req): Json<RegisterRequest>,
-) -> AppResult<(StatusCode, Json<LoginResponse>)> {
-    req.validate()?;
-
-    let (token, user) = auth_service::register(
-        &state,
-        req.email,
-        req.password,
-        &state.jwt_secret,
-        state.jwt_expires_in,
-    )
-    .await?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(LoginResponse {
-            token,
-            user: user.public(),
-        }),
-    ))
-}
 
 pub async fn login(
     State(state): State<AppState>,
