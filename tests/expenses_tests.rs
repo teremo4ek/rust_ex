@@ -740,33 +740,11 @@ async fn test_update_expense_of_other_user_returns_404() {
     let (token, _user_id) = common::register_and_login(&state).await;
     let id = upload_one_expense(&app, &token).await;
 
-    let second = app
-        .clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/api/auth/register")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({"email": "other@example.com", "password": "password123"})
-                        .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(second.status(), StatusCode::CREATED);
-    let second: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(second.into_body(), usize::MAX)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    let other_token = second["token"].as_str().unwrap();
+    let (other_token, _) = common::register_user(&state, "other@example.com", "password123").await;
 
     let (status, _) = put_json(
         &app,
-        other_token,
+        &other_token,
         &format!("/api/expenses/{id}"),
         update_body("20", "2026-04-22", "BYN"),
     )

@@ -56,6 +56,28 @@ async fn test_login_wrong_password() {
 }
 
 #[tokio::test]
+async fn test_register_endpoint_removed() {
+    let app = common::create_test_app().await;
+
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/register")
+                .header("content-type", "application/json")
+                .body(json_body(json!({
+                    "email": "new@example.com",
+                    "password": "password123"
+                })))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn test_login_nonexistent_user() {
     let app = common::create_test_app().await;
 

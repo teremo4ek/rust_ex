@@ -6,7 +6,6 @@ const state = {
   page: 1,
   perPage: 50,
   total: 0,
-  mode: "login",
   expenses: [],
   currentExpense: null,
 };
@@ -49,14 +48,6 @@ function clearMessage() {
 function show(view) {
   $("#auth").hidden = view !== "auth";
   $("#app").hidden = view !== "app";
-}
-
-function setMode(mode) {
-  state.mode = mode;
-  $("#tab-login").classList.toggle("active", mode === "login");
-  $("#tab-register").classList.toggle("active", mode === "register");
-  $("#auth-submit").textContent = mode === "login" ? "Sign in" : "Register";
-  $("#password").autocomplete = mode === "login" ? "current-password" : "new-password";
 }
 
 function logout() {
@@ -194,18 +185,14 @@ function uploadReport(data) {
   return `Receipt ${data.status}: ${data.total} ${data.currency} on ${data.date}, ${data.item_count} items — ${attached}`;
 }
 
-$("#tab-login").addEventListener("click", () => setMode("login"));
-$("#tab-register").addEventListener("click", () => setMode("register"));
-
 $("#auth-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const body = JSON.stringify({
     email: $("#email").value.trim(),
     password: $("#password").value,
   });
-  const path = state.mode === "login" ? "/api/auth/login" : "/api/auth/register";
   try {
-    const data = await api(path, { method: "POST", body });
+    const data = await api("/api/auth/login", { method: "POST", body });
     state.token = data.token;
     state.email = data.user.email;
     localStorage.setItem("token", data.token);

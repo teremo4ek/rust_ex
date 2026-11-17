@@ -50,11 +50,15 @@ pub async fn seed_fixture_rates(state: &AppState, rate: Decimal) {
     }
 }
 
-pub async fn register_and_login(state: &AppState) -> (String, uuid::Uuid) {
+pub async fn register_user(
+    state: &AppState,
+    email: &str,
+    password: &str,
+) -> (String, uuid::Uuid) {
     let (token, user) = auth_service::register(
         state,
-        "test@example.com".into(),
-        "password123".into(),
+        email.into(),
+        password.into(),
         &state.jwt_secret,
         state.jwt_expires_in,
     )
@@ -62,6 +66,10 @@ pub async fn register_and_login(state: &AppState) -> (String, uuid::Uuid) {
     .unwrap();
 
     (token, user.id)
+}
+
+pub async fn register_and_login(state: &AppState) -> (String, uuid::Uuid) {
+    register_user(state, "test@example.com", "password123").await
 }
 
 #[allow(dead_code)]

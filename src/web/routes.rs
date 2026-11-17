@@ -58,7 +58,6 @@ pub fn create_router(state: AppState) -> Router {
                 )
             }),
         )
-        .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/auth/login", post(handlers::auth::login))
         .merge(protected_routes)
         .layer(CorsLayer::permissive())
