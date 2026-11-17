@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
@@ -30,6 +32,18 @@ pub fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
+}
+
+// burn an argon2 verification when the user doesn't exist so login timing
+// doesn't reveal which emails are registered
+static DUMMY_HASH: OnceLock<String> = OnceLock::new();
+
+fn burn_dummy_verify() {
+    let hash = DUMMY_HASH
+        .get_or_init(|| hash_password(&Uuid::new_v4().to_string()).unwrap_or_default());
+    if !hash.is_empty() {
+        let _ = verify_password("dummy", hash);
+    }
 }
 
 pub fn generate_token(user_id: &str, secret: &str, expires_in: i64) -> AppResult<String> {
@@ -89,13 +103,19 @@ pub async fn login(
     jwt_secret: &str,
     jwt_expires_in: i64,
 ) -> AppResult<(String, User)> {
-    let row = sqlx::query_as::<_, UserRow>(
+    let row = match sqlx::query_as::<_, UserRow>(
         "SELECT id, email, password_hash FROM users WHERE email = ?",
     )
     .bind(email)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or(AppError::Unauthorized)?;
+    {
+        Some(row) => row,
+        None => {
+            burn_dummy_verify();
+            return Err(AppError::Unauthorized);
+        }
+    };
 
     if !verify_password(password, &row.password_hash)? {
         return Err(AppError::Unauthorized);
@@ -147,6 +167,29 @@ mod tests {
         let hash = hash_password("password123").unwrap();
         assert!(verify_password("password123", &hash).unwrap());
         assert!(!verify_password("wrong", &hash).unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_login_unknown_email_returns_unauthorized() {
+        let config = Config {
+            jwt_secret: "test_secret".into(),
+            jwt_expires_in: 3600,
+            port: 0,
+            database_url: "sqlite::memory:".into(),
+        };
+        let state = AppState::from_config(&config).await.unwrap();
+
+        let err = login(
+            &state,
+            "nobody@example.com",
+            "password123",
+            &state.jwt_secret,
+            state.jwt_expires_in,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, AppError::Unauthorized));
     }
 
     #[test]

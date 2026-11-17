@@ -10,7 +10,7 @@ use super::{PublicUser, Account, Expense, Receipt, ReceiptStatus, TransactionKin
 pub struct RegisterRequest {
     #[validate(email(message = "invalid email"))]
     pub email: String,
-    #[validate(length(min = 8, message = "password must be at least 8 characters"))]
+    #[validate(length(min = 8, max = 128, message = "password must be between 8 and 128 characters"))]
     pub password: String,
 }
 
@@ -18,6 +18,7 @@ pub struct RegisterRequest {
 pub struct LoginRequest {
     #[validate(email(message = "invalid email"))]
     pub email: String,
+    #[validate(length(max = 128, message = "password must be at most 128 characters"))]
     pub password: String,
 }
 
@@ -144,6 +145,24 @@ mod tests {
         let req = RegisterRequest {
             email: "test@example.com".into(),
             password: "short".into(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_request_rejects_long_password() {
+        let req = RegisterRequest {
+            email: "test@example.com".into(),
+            password: "x".repeat(129),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_login_request_rejects_long_password() {
+        let req = LoginRequest {
+            email: "test@example.com".into(),
+            password: "x".repeat(129),
         };
         assert!(req.validate().is_err());
     }

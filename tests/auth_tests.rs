@@ -100,6 +100,28 @@ async fn test_login_nonexistent_user() {
 }
 
 #[tokio::test]
+async fn test_login_oversized_password_rejected() {
+    let app = common::create_test_app().await;
+
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(json_body(json!({
+                    "email": "test@example.com",
+                    "password": "x".repeat(200)
+                })))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn test_unauthorized_access() {
     let app = common::create_test_app().await;
 
