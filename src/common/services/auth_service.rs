@@ -140,6 +140,7 @@ pub async fn find_by_id(state: &AppState, id: Uuid) -> AppResult<Option<User>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::config::Config;
 
     #[test]
     fn test_hash_and_verify_password() {
@@ -160,5 +161,38 @@ mod tests {
     fn test_invalid_token() {
         let claims = validate_token("invalid.token.here", "secret");
         assert!(claims.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_register_duplicate_email_returns_conflict() {
+        let config = Config {
+            jwt_secret: "test_secret".into(),
+            jwt_expires_in: 3600,
+            port: 0,
+            database_url: "sqlite::memory:".into(),
+        };
+        let state = AppState::from_config(&config).await.unwrap();
+
+        register(
+            &state,
+            "dup@example.com".into(),
+            "password123".into(),
+            &state.jwt_secret,
+            state.jwt_expires_in,
+        )
+        .await
+        .unwrap();
+
+        let err = register(
+            &state,
+            "dup@example.com".into(),
+            "other12345".into(),
+            &state.jwt_secret,
+            state.jwt_expires_in,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, AppError::Conflict(_)));
     }
 }

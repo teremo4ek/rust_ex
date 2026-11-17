@@ -8,7 +8,7 @@ use tower::ServiceExt;
 async fn test_upload_csv() {
     let (app, state) = common::create_test_app_with_state().await;
     common::seed_fixture_rates(&state, rust_decimal::dec!(2.8230)).await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (token, _user_id) = common::register_and_login(&state).await;
 
     let csv_content = include_str!("fixtures/monefy.csv");
 
@@ -189,7 +189,7 @@ async fn put_json(
 async fn test_upload_csv_twice_second_is_all_duplicates() {
     let (app, state) = common::create_test_app_with_state().await;
     common::seed_fixture_rates(&state, rust_decimal::dec!(2.8230)).await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (token, _user_id) = common::register_and_login(&state).await;
 
     let first = upload_fixture(&app, &token).await;
     assert_eq!(first["imported"].as_u64().unwrap(), 41);
@@ -242,8 +242,8 @@ async fn test_upload_csv_twice_second_is_all_duplicates() {
 
 #[tokio::test]
 async fn test_list_expenses_newest_first() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     upload_fixture(&app, &token).await;
 
     let (_, body) = get_json(&app, &token, "/api/expenses").await;
@@ -264,8 +264,8 @@ async fn test_list_expenses_newest_first() {
 
 #[tokio::test]
 async fn test_list_expenses_description_filter() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     upload_fixture(&app, &token).await;
 
     let (status, body) = get_json(&app, &token, "/api/expenses?description=grocery%20store").await;
@@ -328,8 +328,8 @@ async fn test_upload_without_auth() {
 
 #[tokio::test]
 async fn test_list_expenses() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
 
     let res = app
         .clone()
@@ -349,8 +349,8 @@ async fn test_list_expenses() {
 
 #[tokio::test]
 async fn test_list_expenses_with_category_filter() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
 
     let res = app
         .clone()
@@ -370,8 +370,8 @@ async fn test_list_expenses_with_category_filter() {
 
 #[tokio::test]
 async fn test_upload_pdf_receipt() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     let pdf = include_bytes!("fixtures/check.pdf");
 
     let body = upload_bytes(&app, &token, "check.pdf", "application/pdf", pdf).await;
@@ -399,7 +399,7 @@ async fn test_upload_pdf_then_csv_attaches_receipt() {
         rust_decimal::dec!(2.8230),
     )
     .await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     let pdf = include_bytes!("fixtures/check.pdf");
 
     upload_bytes(&app, &token, "check.pdf", "application/pdf", pdf).await;
@@ -438,8 +438,8 @@ date,account,category,amount,currency,converted amount,currency,description
 
 #[tokio::test]
 async fn test_upload_same_pdf_twice_is_duplicate() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     let pdf = include_bytes!("fixtures/check.pdf");
 
     let first = upload_bytes(&app, &token, "check.pdf", "application/pdf", pdf).await;
@@ -459,7 +459,7 @@ async fn test_get_expense_receipt_without_receipt_is_404() {
         rust_decimal::dec!(2.8230),
     )
     .await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     let csv = "\
 date,account,category,amount,currency,converted amount,currency,description
 11/2/2026,Payment card,Food,-11.51,BYN,-11.51,BYN,Euroopt
@@ -480,8 +480,8 @@ date,account,category,amount,currency,converted amount,currency,description
 
 #[tokio::test]
 async fn test_upload_corrupt_pdf_returns_bad_request() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
 
     let pdf = b"%PDF- definitely corrupt";
     let boundary = "test-boundary-corrupt-pdf";
@@ -516,8 +516,8 @@ async fn test_upload_corrupt_pdf_returns_bad_request() {
 
 #[tokio::test]
 async fn test_upload_rejects_non_finite_amount() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
 
     let boundary = "test-boundary-nan";
     let body = format!(
@@ -551,8 +551,8 @@ async fn test_upload_rejects_non_finite_amount() {
 
 #[tokio::test]
 async fn test_upload_html_receipt() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     let html = include_bytes!("fixtures/check3.html");
 
     let body = upload_bytes(&app, &token, "check3.html", "text/html", html).await;
@@ -609,8 +609,8 @@ async fn post_receipt_url(
 
 #[tokio::test]
 async fn test_receipt_url_rejects_empty_and_non_http_schemes() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
 
     let (status, body) = post_receipt_url(&app, &token, "").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -676,7 +676,7 @@ async fn test_update_expense_recomputes_amount_usd() {
         rust_decimal::dec!(2.8230),
     )
     .await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     let id = upload_one_expense(&app, &token).await;
 
     let (status, body) = put_json(
@@ -712,8 +712,8 @@ async fn test_update_expense_recomputes_amount_usd() {
 
 #[tokio::test]
 async fn test_update_missing_expense_returns_404() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
 
     let id = uuid::Uuid::new_v4();
     let (status, body) = put_json(
@@ -737,7 +737,7 @@ async fn test_update_expense_of_other_user_returns_404() {
         rust_decimal::dec!(2.8230),
     )
     .await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     let id = upload_one_expense(&app, &token).await;
 
     let second = app
@@ -777,8 +777,8 @@ async fn test_update_expense_of_other_user_returns_404() {
 
 #[tokio::test]
 async fn test_update_rejects_non_positive_amount() {
-    let app = common::create_test_app().await;
-    let (token, _user_id) = common::register_and_login(&app).await;
+    let (app, state) = common::create_test_app_with_state().await;
+    let (token, _user_id) = common::register_and_login(&state).await;
     let id = uuid::Uuid::new_v4();
 
     for amount in ["0", "-5"] {

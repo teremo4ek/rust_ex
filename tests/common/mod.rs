@@ -1,14 +1,11 @@
 use std::collections::BTreeSet;
 
 use axum::Router;
-use axum::body::Body;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
-use serde_json::{Value, json};
-use tower::ServiceExt;
 
 use expense_tracker::common::config::Config;
-use expense_tracker::common::services::expense_service;
+use expense_tracker::common::services::{auth_service, expense_service};
 use expense_tracker::common::state::AppState;
 use expense_tracker::web::routes;
 
@@ -53,37 +50,18 @@ pub async fn seed_fixture_rates(state: &AppState, rate: Decimal) {
     }
 }
 
-pub async fn register_and_login(app: &Router) -> (String, uuid::Uuid) {
-    let res = app
-        .clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/api/auth/register")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_vec(
-                        &json!({"email": "test@example.com", "password": "password123"}),
-                    )
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), 201);
-
-    let body: Value = serde_json::from_slice(
-        &axum::body::to_bytes(res.into_body(), usize::MAX)
-            .await
-            .unwrap(),
+pub async fn register_and_login(state: &AppState) -> (String, uuid::Uuid) {
+    let (token, user) = auth_service::register(
+        state,
+        "test@example.com".into(),
+        "password123".into(),
+        &state.jwt_secret,
+        state.jwt_expires_in,
     )
+    .await
     .unwrap();
-    let token = body["token"].as_str().unwrap().to_string();
-    let user_id = body["user"]["id"].as_str().unwrap().parse().unwrap();
 
-    (token, user_id)
+    (token, user.id)
 }
 
 #[allow(dead_code)]

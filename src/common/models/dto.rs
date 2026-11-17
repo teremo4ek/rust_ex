@@ -125,3 +125,35 @@ pub struct TimelinePoint {
     pub income: Decimal,
     pub expense: Decimal,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_register_request_rejects_invalid_email() {
+        let req = RegisterRequest {
+            email: "not-an-email".into(),
+            password: "password123".into(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_request_rejects_short_password() {
+        let req = RegisterRequest {
+            email: "test@example.com".into(),
+            password: "short".into(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_request_accepts_valid_input() {
+        let req = RegisterRequest {
+            email: "test@example.com".into(),
+            password: "password123".into(),
+        };
+        assert!(req.validate().is_ok());
+    }
+}
